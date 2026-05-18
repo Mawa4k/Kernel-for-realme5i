@@ -4,7 +4,7 @@
 #include <linux/list.h>
 #include <linux/jiffies.h>
 #include <trace/events/sched.h>
-#include <../sched/sched.h>
+#include "../sched/sched.h"
 
 #include <linux/fs.h>
 #include <linux/proc_fs.h>

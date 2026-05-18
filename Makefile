@@ -5,6 +5,11 @@ SUBLEVEL = 117
 EXTRAVERSION =
 NAME = Petit Gorille
 
+export VENDOR_EDIT := true
+export SHIPPING_API_LEVEL := 28
+export ODM_WT_EDIT := yes
+export WT_FINAL_RELEASE := yes
+
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
 # More info can be located in ./README

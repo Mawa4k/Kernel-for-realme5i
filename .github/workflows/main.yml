@@ -39,9 +39,11 @@ jobs:
         ld.lld-18 --version
 
 
-    - name: Clean Source
+    - name: Clean Kernel Tree
       run: |
-        make ARCH=arm64 mrproper || true
+        git clean -xfd
+
+        make mrproper
 
 
     - name: Prepare Kernel Config
@@ -62,13 +64,13 @@ jobs:
     - name: Patch Clang 18 Compatibility
       run: |
 
-        # ARM64 spinlock clang 18 fix
+        # Fix ARM64 spinlock clang immediate constraint
         sed -i \
         's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
 
 
-        # signal.h clang array bounds fix
+        # Fix old kernel signal array warning
         sed -i \
         's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
         include/linux/signal.h || true
@@ -98,18 +100,18 @@ jobs:
         ls -lh out/arch/arm64/boot/
 
         if [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Image.gz OK"
+          echo "Image.gz found"
 
         elif [ -f out/arch/arm64/boot/Image ]; then
-          echo "Image OK"
+          echo "Image found"
 
         else
-          echo "Kernel Image missing"
+          echo "Kernel image not found"
           exit 1
         fi
 
 
-    - name: Upload Kernel
+    - name: Upload Kernel Output
       uses: actions/upload-artifact@v4
       with:
         name: Realme5i-Kernel

@@ -1,207 +1,95 @@
-name: Realme 5i Kernel Build
+name: Kernel Build
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
 
-    - name: Checkout Kernel Source
+    - name: Checkout kernel source
       uses: actions/checkout@v4
-      with:
-        clean: true
-        fetch-depth: 1
 
-
-    - name: Install Dependencies
+    - name: Install dependencies
       run: |
         sudo apt update
-
         sudo apt install -y \
+          build-essential \
           bc \
           bison \
           flex \
-          build-essential \
           libssl-dev \
           libelf-dev \
+          dwarves \
           python3 \
-          python-is-python3 \
-          cpio \
-          rsync \
-          clang-18 \
-          llvm-18 \
-          llvm-18-tools \
-          lld-18 \
-          gcc-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu \
-          device-tree-compiler \
-          kmod
+          clang \
+          lld \
+          llvm \
+          gcc-aarch64-linux-gnu
 
-
-
-    - name: Force LLVM 18
+    - name: Setup clang environment
       run: |
-
-        export PATH=/usr/lib/llvm-18/bin:$PATH
-
-        echo "LLVM PATH:"
-        which clang
-        which llvm-objcopy
-        which ld.lld
-
         clang --version
-        llvm-objcopy --version
         ld.lld --version
 
-
-
-    - name: Create Out Directory
+    - name: Create output directory
       run: |
-        rm -rf out
-        mkdir out
+        mkdir -p out
 
-
-
-    - name: Setup Defconfig
+    - name: Load kernel config
       run: |
+        cp arch/arm64/configs/vendor/trinket_defconfig out/.config || true
+        make O=out ARCH=arm64 olddefconfig
 
-        export PATH=/usr/lib/llvm-18/bin:$PATH
+    - name: Fix cxd224x section mismatch
+      run: |
+        echo "Searching init_wqueue..."
+        grep -R "init_wqueue" -n drivers || true
 
+        FILE=$(grep -rl "init_wqueue" drivers | head -n 1)
 
-        make O=out ARCH=arm64 \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          CC=clang \
-          LD=ld.lld \
-          vendor/trinket_oppo/trinket_defconfig
+        if [ -n "$FILE" ]; then
+          echo "Patching $FILE"
+          sed -i 's/__init init_wqueue/init_wqueue/g' "$FILE"
+          sed -i 's/__init[[:space:]]*init_wqueue/init_wqueue/g' "$FILE"
+        fi
 
-
-
-        ./scripts/config --file out/.config \
-          -d CONFIG_CC_STACKPROTECTOR_STRONG \
-          -d CONFIG_CC_STACKPROTECTOR_REGULAR \
-          -e CONFIG_CC_STACKPROTECTOR_NONE
-
-
-        ./scripts/config --file out/.config \
-          -d CONFIG_WERROR \
+    - name: Enable module support options
+      run: |
+        scripts/config --file out/.config \
           -e CONFIG_MODULES \
           -e CONFIG_MODULE_UNLOAD \
+          -e CONFIG_MODULE_FORCE_LOAD \
+          -e CONFIG_MODULE_FORCE_UNLOAD
+
+        scripts/config --file out/.config \
           -d CONFIG_MODULE_SIG \
           -d CONFIG_MODULE_SIG_FORCE
 
+        make O=out ARCH=arm64 olddefconfig
 
-
-        yes "" | make O=out ARCH=arm64 \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          CC=clang \
-          LD=ld.lld \
-          oldconfig
-
-
-
-    - name: Remove Bad Clang Flags
+    - name: Build kernel
       run: |
-
-        echo "Cleaning old gcc flags"
-
-
-        find . \
-        \( -name "Makefile" -o -name "*.mk" \) \
-        -type f \
-        -exec sed -i \
-        's/-implicit-function-declaration//g' {} \;
-
-
-        sed -i \
-        's/-Werror//g' \
-        Makefile || true
-
-
-
-    - name: Fix Old ARM64 Clang Issue
-      run: |
-
-
-        if [ -f arch/arm64/include/asm/stack_pointer.h ]; then
-
-        sed -i \
-        's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer __asm__("sp");/' \
-        arch/arm64/include/asm/stack_pointer.h
-
-        fi
-
-
-
-    - name: Build Kernel
-      run: |
-
-        export PATH=/usr/lib/llvm-18/bin:$PATH
-
-
-        set -o pipefail
-
-
-        make -j$(nproc) \
+        make \
           O=out \
           ARCH=arm64 \
+          CC=clang \
           LLVM=1 \
           LLVM_IAS=1 \
-          CC=clang \
-          LD=ld.lld \
-          AR=llvm-ar \
-          NM=llvm-nm \
-          OBJCOPY=llvm-objcopy \
-          OBJDUMP=llvm-objdump \
-          STRIP=llvm-strip \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-error -Wno-array-bounds -Wno-unused-variable -Wno-unused-but-set-variable -Wno-misleading-indentation" \
-          2>&1 | tee build.log
+          -j$(nproc)
 
-
-
-    - name: Check Build Result
-      if: always()
+    - name: Check Image
       run: |
+        ls -lh out/arch/arm64/boot/Image || true
+        ls -lh out/vmlinux || true
 
-
-        echo "===== IMAGE ====="
-
-        ls -lh out/arch/arm64/boot/ || true
-
-
-        echo "===== SEARCH IMAGE ====="
-
-        find out \
-        -name "Image*" \
-        -o -name "vmlinux" || true
-
-
-        echo "===== ERRORS ====="
-
-        grep -n "error:" build.log | tail -50 || true
-
-
-
-    - name: Upload Kernel
-      if: always()
+    - name: Upload kernel
       uses: actions/upload-artifact@v4
-
       with:
-
-        name: Realme5i-Kernel
-
+        name: kernel-output
         path: |
-
-          out/arch/arm64/boot/*
+          out/arch/arm64/boot/Image
           out/vmlinux
-          out/.config
-          build.log
-
-        if-no-files-found: warn

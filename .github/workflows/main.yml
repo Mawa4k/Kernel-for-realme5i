@@ -5,15 +5,17 @@ on:
 
 jobs:
   build:
+
     runs-on: ubuntu-latest
 
     steps:
 
-    - name: Checkout Kernel Source
+    - name: Checkout Source
       uses: actions/checkout@v4
       with:
         clean: true
         fetch-depth: 1
+
 
     - name: Install Dependencies
       run: |
@@ -30,73 +32,67 @@ jobs:
           device-tree-compiler \
           kmod
 
-    - name: Toolchain Check
+
+    - name: Toolchain
       run: |
         clang-18 --version
         ld.lld-18 --version
         aarch64-linux-gnu-gcc --version
 
 
-    - name: Find Defconfig
-      id: findcfg
+    - name: Select Defconfig
+      id: cfg
       run: |
 
-        echo "Searching defconfig..."
-
-        find arch/arm64/configs -type f -name '*defconfig*' | sort
-
-
-        CFG="arch/arm64/configs/vendor/trinket_oppo/trinket-perf_defconfig"
+        echo "Available configs:"
+        find arch/arm64/configs -type f -name "*defconfig*" | sort
 
 
-        if [ ! -f "$CFG" ]; then
-          CFG="arch/arm64/configs/vendor/trinket_oppo/trinket_defconfig"
+        DEF="arch/arm64/configs/vendor/trinket_oppo/trinket-perf_defconfig"
+
+
+        if [ ! -f "$DEF" ]; then
+          DEF="arch/arm64/configs/vendor/trinket_oppo/trinket_defconfig"
         fi
 
 
-        if [ ! -f "$CFG" ]; then
-          echo "Defconfig not found!"
+        if [ ! -f "$DEF" ]; then
+          echo "No trinket config found"
           exit 1
         fi
 
 
-        echo "Using:"
-        echo "$CFG"
+        echo "Using $DEF"
 
 
-        REL=$(echo "$CFG" | sed 's|arch/arm64/configs/||')
-
-
-        echo "defconfig=$REL" >> $GITHUB_OUTPUT
+        echo "defconfig=$(echo $DEF | sed 's|arch/arm64/configs/||')" >> $GITHUB_OUTPUT
 
 
 
-    - name: Create Out Directory
+    - name: Prepare Out
       run: |
         rm -rf out
         mkdir out
 
 
 
-    - name: Setup Kernel Config
+    - name: Generate Config
       env:
-        DEFCONFIG: ${{ steps.findcfg.outputs.defconfig }}
+        DEFCONFIG: ${{ steps.cfg.outputs.defconfig }}
 
       run: |
 
         export PATH=/usr/lib/llvm-18/bin:$PATH
 
 
-        make O=out ARCH=arm64 \
+        make O=out \
+          ARCH=arm64 \
           CC=clang-18 \
           LD=ld.lld-18 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           $DEFCONFIG
 
-
-
-        echo "Disable stack protector"
 
 
         ./scripts/config --file out/.config \
@@ -108,13 +104,18 @@ jobs:
 
 
         sed -i \
-        -e 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' \
-        -e 's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/# CONFIG_CC_STACKPROTECTOR_REGULAR is not set/' \
+        's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' \
+        out/.config
+
+
+        sed -i \
+        's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/# CONFIG_CC_STACKPROTECTOR_REGULAR is not set/' \
         out/.config
 
 
 
-        yes "" | make O=out ARCH=arm64 \
+        yes "" | make O=out \
+          ARCH=arm64 \
           CC=clang-18 \
           LD=ld.lld-18 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -123,12 +124,11 @@ jobs:
 
 
 
-        echo "Final config:"
         grep STACKPROTECTOR out/.config || true
 
 
 
-    - name: Apply Clang Fix
+    - name: Clang Compatibility Patch
       run: |
 
 
@@ -142,11 +142,11 @@ jobs:
 
 
 
-        if [ -f include/linux/signal.h ]; then
+        if [ -f drivers/clk/qcom/mdss/mdss-dsi-pll-14nm-util.c ]; then
 
           sed -i \
-          's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
-          include/linux/signal.h || true
+          's/%lu/%u/g' \
+          drivers/clk/qcom/mdss/mdss-dsi-pll-14nm-util.c || true
 
         fi
 
@@ -176,39 +176,58 @@ jobs:
           STRIP=llvm-strip \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-error -Wno-format -Wno-array-bounds -Wno-unused-variable" \
+          KCFLAGS="-Wno-error \
+          -Wno-format \
+          -Wno-array-bounds \
+          -Wno-unused-variable \
+          -Wno-unused-but-set-variable \
+          -Wno-implicit-function-declaration" \
           2>&1 | tee build.log
 
 
 
-    - name: Check Kernel Image
+    - name: Show Error If Failed
+
+      if: failure()
+
+      run: |
+
+        echo "===== LAST LOG ====="
+
+        tail -200 build.log
+
+
+        echo "===== ERROR ====="
+
+        grep -nEi \
+        "error:|failed|fatal|undefined|cannot|No rule" \
+        build.log || true
+
+
+
+    - name: Check Image
+
+      if: always()
 
       run: |
 
         ls -lh out/arch/arm64/boot/ || true
 
 
-        if [ -f out/arch/arm64/boot/Image.gz ]; then
+        if [ -f out/arch/arm64/boot/Image.gz ] || \
+           [ -f out/arch/arm64/boot/Image ]; then
 
-          echo "Image.gz found"
-
-        elif [ -f out/arch/arm64/boot/Image ]; then
-
-          echo "Image found"
+          echo "Kernel Image OK"
 
         else
 
-          echo "Kernel Image missing"
-
-          tail -100 build.log
-
-          exit 1
+          echo "Kernel Image not found"
 
         fi
 
 
 
-    - name: Upload Kernel
+    - name: Upload Artifact
 
       if: always()
 

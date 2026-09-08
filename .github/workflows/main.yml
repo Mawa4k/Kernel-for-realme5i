@@ -1,0 +1,52 @@
+name: Build Realme 5i Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32z1-dev libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zlib1g-dev python3
+
+      - name: Setup Clang Toolchain (Clang 18+)
+        run: |
+          mkdir -p $HOME/clang
+          cd $HOME/clang
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928.git clang
+          echo "$HOME/clang/clang/bin" >> $GITHUB_PATH
+
+      - name: Build Kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH=$HOME/clang/clang/bin:$PATH
+          
+          # আপনার ডিফকনফিগ ফাইল ফাইন্ড আউট করে এখানে বসাবেন (যেমন: trinket_defconfig)
+          make O=out trinket_defconfig
+          
+          # যদি ডিফকনফিগে স্ক্রিনশটের কোডগুলো ম্যানুয়ালি যুক্ত করতে না চান, তবে স্ক্রিপ্ট দিয়েও করা যায়:
+          echo "CONFIG_MODULES=y" >> out/.config
+          echo "CONFIG_MODULE_FORCE_LOAD=y" >> out/.config
+          echo "CONFIG_MODULE_UNLOAD=y" >> out/.config
+          echo "CONFIG_MODULE_FORCE_UNLOAD=y" >> out/.config
+          echo "CONFIG_MODULE_SIG=n" >> out/.config
+          echo "CONFIG_MODULE_SIG_FORCE=n" >> out/.config
+          echo "CONFIG_MODULE_SIG_ALL=n" >> out/.config
+          
+          make -j$(nproc --all) O=out CC=clang LD=ld.lld
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image.gz-dtb
+          path: out/arch/arm64/boot/Image.gz-dtb

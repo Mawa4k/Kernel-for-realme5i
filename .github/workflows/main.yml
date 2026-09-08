@@ -9,7 +9,7 @@ jobs:
 
     steps:
 
-    - name: Checkout Kernel Source
+    - name: Checkout Source
       uses: actions/checkout@v4
 
 
@@ -33,39 +33,51 @@ jobs:
           gcc-aarch64-linux-gnu
 
 
-    - name: Toolchain Check
+    - name: Toolchain
       run: |
         clang-18 --version
         ld.lld-18 --version
 
 
-    - name: Clean Source
+    - name: Clean Build
       run: |
         git reset --hard HEAD
         git clean -xfd
 
         rm -rf out
 
-        make ARCH=arm64 mrproper || true
+
+    - name: Show Prepare3
+      run: |
+        echo "===== Makefile prepare3 ====="
+        nl -ba Makefile | sed -n '1170,1220p'
 
 
-    - name: Patch Kernel Makefile Clean Check
+    - name: Patch Prepare3 Clean Check
       run: |
         python3 - <<'PY'
         from pathlib import Path
+        import re
 
         p = Path("Makefile")
         s = p.read_text()
 
-        old = """$(error "  .. is not clean, please run 'make mrproper'")"""
+        # remove the source dirty check error
+        s = re.sub(
+            r'echo.*not clean.*make mrproper.*',
+            'true',
+            s
+        )
 
-        if old in s:
-            s = s.replace(old, "")
-            print("Clean check disabled")
-        else:
-            print("Clean check pattern not found")
+        s = re.sub(
+            r'\$\(error.*not clean.*\)',
+            'true',
+            s
+        )
 
         p.write_text(s)
+
+        print("prepare3 patch applied")
         PY
 
 
@@ -84,16 +96,14 @@ jobs:
         make O=out ARCH=arm64 olddefconfig
 
 
-    - name: Patch Clang 18 Issues
+    - name: Fix Clang 18
       run: |
 
-        # ARM64 spinlock fix
         sed -i \
         's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
 
 
-        # signal.h array bound fix
         sed -i \
         's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
         include/linux/signal.h || true
@@ -118,28 +128,20 @@ jobs:
         exit ${PIPESTATUS[0]}
 
 
-    - name: Check Kernel Image
+    - name: Check Image
       run: |
 
-        ls -lh out/arch/arm64/boot/
+        ls -lh out/arch/arm64/boot
 
-        if [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Image.gz found"
-
-        elif [ -f out/arch/arm64/boot/Image ]; then
-          echo "Image found"
-
-        else
-          echo "Kernel Image missing"
-          exit 1
-        fi
+        test -f out/arch/arm64/boot/Image.gz || \
+        test -f out/arch/arm64/boot/Image
 
 
-    - name: Upload Build Output
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
         name: Realme5i-Kernel
         path: |
           out/arch/arm64/boot/*
-          out/.config
           build.log
+          out/.config

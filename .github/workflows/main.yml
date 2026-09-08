@@ -27,44 +27,53 @@ jobs:
           dwarves \
           python3 \
           wget \
-          xz-utils \
+          gnupg \
+          lsb-release \
+          software-properties-common \
           gcc-aarch64-linux-gnu
 
 
-    - name: Install Clang LLVM 18
+    - name: Install LLVM Clang 18
       run: |
+        wget https://apt.llvm.org/llvm.sh
 
-        wget -q \
-        https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+        chmod +x llvm.sh
 
-        tar -xf clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+        sudo ./llvm.sh 18
 
-        mv \
-        clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04 \
-        llvm18
+        clang-18 --version
+        ld.lld-18 --version
 
-        echo "$PWD/llvm18/bin" >> $GITHUB_PATH
+
+    - name: Setup LLVM
+      run: |
+        sudo update-alternatives \
+        --install /usr/bin/clang clang /usr/bin/clang-18 100
+
+        sudo update-alternatives \
+        --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
 
         clang --version
         ld.lld --version
 
 
-    - name: Prepare Build Directory
+    - name: Create Out Directory
       run: |
         mkdir -p out
 
 
-    - name: Load Trinket Defconfig
+    - name: Setup Trinket Defconfig
       run: |
 
         if [ -f arch/arm64/configs/vendor/trinket_defconfig ]; then
-
           cp arch/arm64/configs/vendor/trinket_defconfig out/.config
 
-        else
-
+        elif [ -f arch/arm64/configs/trinket_defconfig ]; then
           cp arch/arm64/configs/trinket_defconfig out/.config
 
+        else
+          echo "Defconfig not found"
+          exit 1
         fi
 
 
@@ -74,11 +83,17 @@ jobs:
         olddefconfig
 
 
-    - name: Kernel Config Fix
+
+    - name: Fix Old Kernel Config
       run: |
 
         scripts/config --file out/.config \
         -d CONFIG_WERROR
+
+
+        scripts/config --file out/.config \
+        -d CONFIG_MODULE_SIG \
+        -d CONFIG_MODULE_SIG_FORCE
 
 
         scripts/config --file out/.config \
@@ -88,22 +103,17 @@ jobs:
         -e CONFIG_MODULE_FORCE_UNLOAD
 
 
-        scripts/config --file out/.config \
-        -d CONFIG_MODULE_SIG \
-        -d CONFIG_MODULE_SIG_FORCE
-
-
         make \
         O=out \
         ARCH=arm64 \
         olddefconfig
 
 
+
     - name: Build Kernel
       run: |
 
         set -o pipefail
-
 
         make \
         O=out \
@@ -116,18 +126,28 @@ jobs:
         -j$(nproc) 2>&1 | tee build.log
 
 
-    - name: Show Errors If Failed
+
+    - name: Error Report
       if: failure()
       run: |
 
-        echo "========== ERRORS =========="
+        echo "========== BUILD ERROR =========="
 
-        grep -iE \
-        "error:|fatal:|modpost|ld.lld|undefined" \
-        build.log || true
+        if [ -f build.log ]; then
+
+          grep -iE \
+          "error:|fatal:|modpost|ld.lld|undefined|failed" \
+          build.log | tail -200
+
+        else
+
+          echo "No build.log found"
+
+        fi
 
 
-    - name: Check Kernel Output
+
+    - name: Check Kernel Image
       run: |
 
         echo "========== OUTPUT =========="
@@ -137,19 +157,21 @@ jobs:
         ls -lh out/arch/arm64/boot/Image || true
 
 
+
     - name: Upload Build Log
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-log
+        name: kernel-build-log
         path: build.log
 
 
-    - name: Upload Kernel Image
+
+    - name: Upload Kernel
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: realme-trinket-kernel-clang18
+        name: realme5i-trinket-kernel
         path: |
           out/vmlinux
           out/arch/arm64/boot/Image

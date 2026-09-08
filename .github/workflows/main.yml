@@ -1,4 +1,4 @@
-name: Realme5i Kernel Build
+name: Realme 5i Kernel Build
 
 on:
   workflow_dispatch:
@@ -9,102 +9,185 @@ jobs:
 
     steps:
 
-    - name: Checkout
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
         clean: true
-
+        fetch-depth: 1
 
     - name: Install Dependencies
       run: |
         sudo apt update
 
         sudo apt install -y \
-          bc bison flex \
+          bc \
+          bison \
+          flex \
           build-essential \
           libssl-dev \
           libelf-dev \
           python3 \
           python-is-python3 \
-          cpio rsync \
-          clang-14 llvm-14 lld-14 \
+          cpio \
+          rsync \
+          clang-18 \
+          llvm-18 \
+          llvm-18-tools \
+          lld-18 \
           gcc-aarch64-linux-gnu \
-          device-tree-compiler
+          binutils-aarch64-linux-gnu \
+          device-tree-compiler \
+          kmod
+
+    - name: Force LLVM 18
+      run: |
+
+        sudo update-alternatives \
+          --install /usr/bin/clang clang \
+          /usr/lib/llvm-18/bin/clang 180
+
+        sudo update-alternatives \
+          --install /usr/bin/ld.lld ld.lld \
+          /usr/lib/llvm-18/bin/ld.lld 180
+
+        sudo update-alternatives \
+          --install /usr/bin/llvm-objcopy llvm-objcopy \
+          /usr/lib/llvm-18/bin/llvm-objcopy 180
+
+        sudo update-alternatives \
+          --install /usr/bin/llvm-strip llvm-strip \
+          /usr/lib/llvm-18/bin/llvm-strip 180
 
 
-    - name: Prepare
+        clang --version
+        ld.lld --version
+        llvm-objcopy --version
+
+
+    - name: Create Output Directory
       run: |
         rm -rf out
         mkdir out
 
 
-    - name: Setup Config
+    - name: Setup Realme 5i Defconfig
       run: |
 
-        export PATH=/usr/lib/llvm-14/bin:$PATH
+        export PATH=/usr/lib/llvm-18/bin:$PATH
 
 
-        make O=out \
-        ARCH=arm64 \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        CC=clang-14 \
-        LD=ld.lld-14 \
-        vendor/trinket_oppo/trinket_defconfig
+        make O=out ARCH=arm64 \
+          CC=clang \
+          LD=ld.lld \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          vendor/trinket_oppo/trinket_defconfig
 
 
         ./scripts/config --file out/.config \
-        -d CC_STACKPROTECTOR_STRONG \
-        -d CC_STACKPROTECTOR_REGULAR \
-        -e CC_STACKPROTECTOR_NONE \
-        -d MODULE_SIG \
-        -d MODULE_SIG_FORCE
+          -d CONFIG_CC_STACKPROTECTOR_STRONG \
+          -d CONFIG_CC_STACKPROTECTOR_REGULAR \
+          -e CONFIG_CC_STACKPROTECTOR_NONE
 
 
-        make O=out ARCH=arm64 olddefconfig
+        ./scripts/config --file out/.config \
+          -e CONFIG_MODULES \
+          -e CONFIG_MODULE_UNLOAD \
+          -d CONFIG_MODULE_SIG \
+          -d CONFIG_MODULE_SIG_FORCE
+
+
+        yes "" | make O=out ARCH=arm64 \
+          CC=clang \
+          LD=ld.lld \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          oldconfig
+
+
+
+    - name: Patch Old Kernel Clang Issues
+      run: |
+
+        # Fix old ARM64 stack pointer clang issue
+        sed -i \
+        's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer __asm__("sp");/' \
+        arch/arm64/include/asm/stack_pointer.h || true
+
+
+        # Fix old GCC warning treated as error
+        sed -i \
+        's/-Werror//g' \
+        Makefile || true
 
 
 
     - name: Build Kernel
       run: |
 
-        export PATH=/usr/lib/llvm-14/bin:$PATH
+        export PATH=/usr/lib/llvm-18/bin:$PATH
+
+        set -o pipefail
 
 
         make -j$(nproc) \
-        O=out \
-        ARCH=arm64 \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        CC=clang-14 \
-        LD=ld.lld-14 \
-        AR=llvm-ar-14 \
-        NM=llvm-nm-14 \
-        OBJCOPY=llvm-objcopy-14 \
-        STRIP=llvm-strip-14 \
-        CROSS_COMPILE=aarch64-linux-gnu- \
-        KCFLAGS="-Wno-error" \
-        2>&1 | tee build.log
+          O=out \
+          ARCH=arm64 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CC=clang \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          KCFLAGS="-Wno-error \
+          -Wno-array-bounds \
+          -Wno-unused-variable \
+          -Wno-unused-but-set-variable \
+          -Wno-misleading-indentation" \
+          2>&1 | tee build.log
 
 
 
-    - name: Check Image
+    - name: Check Output
       if: always()
       run: |
 
+        echo "===== BOOT FILES ====="
+
         ls -lh out/arch/arm64/boot/ || true
 
-        tail -100 build.log
+
+        echo "===== IMAGE CHECK ====="
+
+        find out/arch/arm64/boot \
+          -name "Image*" \
+          -o -name "dtb" || true
+
+
+        echo "===== ERRORS ====="
+
+        grep -n "error:" build.log | tail -30 || true
 
 
 
-    - name: Upload
+    - name: Upload Kernel
       if: always()
       uses: actions/upload-artifact@v4
       with:
+
         name: Realme5i-Kernel
+
         path: |
           out/arch/arm64/boot/*
+          out/vmlinux
           out/.config
           build.log
+
         if-no-files-found: warn

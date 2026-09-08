@@ -22,8 +22,10 @@ jobs:
         run: |
           mkdir -p $HOME/clang
           cd $HOME/clang
-          git config --global --unset http.https://github.com/.extraheader || true
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928.git clang
+          # Git clone এর বদলে সরাসরি tarball ডাউনলোড করা হচ্ছে যাতে কোনো অথেন্টিকেশন এরর না আসে
+          curl -L -o clang.tar.gz https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928/archive/refs/heads/main.tar.gz
+          tar -xzf clang.tar.gz
+          mv android_prebuilts_clang_host_linux-x86_clang-r510928-main clang
           echo "$HOME/clang/clang/bin" >> $GITHUB_PATH
 
       - name: Build Kernel
@@ -32,7 +34,7 @@ jobs:
           export SUBARCH=arm64
           export PATH=$HOME/clang/clang/bin:$PATH
           
-          # আপনার ডিফকনফিগ ফাইলের নাম এখানে বসানো হয়েছে (trinket_defconfig)
+          # আপনার ডিফকনফিগ ফাইলের নাম (trinket_defconfig) দিয়ে কনফিগার করা
           make O=out trinket_defconfig
           
           # আপনার স্ক্রিনশটের নির্দেশ অনুযায়ী ডিফকনফিগে কনফিগারেশন যুক্ত করা

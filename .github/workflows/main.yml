@@ -12,129 +12,75 @@ jobs:
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
-        clean: true
+        clean: false
         fetch-depth: 1
-
 
     - name: Install Dependencies
       run: |
         sudo apt update
-
         sudo apt install -y \
-          bc bison flex \
-          build-essential \
+          bc bison flex build-essential \
           libssl-dev libelf-dev \
           python3 python-is-python3 \
           cpio rsync \
           clang-18 llvm-18 lld-18 \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          device-tree-compiler kmod
-
+          device-tree-compiler
 
     - name: Toolchain Check
       run: |
         clang-18 --version
         ld.lld-18 --version
-
-
-    - name: Create Output
-      run: |
-        rm -rf out
-        mkdir out
-
+        aarch64-linux-gnu-gcc --version
 
     - name: Setup Defconfig
       run: |
+        mkdir -p out
 
-        CFG=$(find arch/arm64/configs -type f -name '*defconfig*' \
-        | grep -iE 'trinket|sm6125|6125|k68' | head -n1)
+        find arch/arm64/configs -type f -name "*defconfig*"
 
-        if [ -z "$CFG" ]; then
-          CFG=$(find arch/arm64/configs -type f -name '*defconfig*' | head -n1)
+        DEFCONFIG=$(find arch/arm64/configs -type f \
+        -name "*defconfig*" | grep -i trinket | head -n1)
+
+        if [ -z "$DEFCONFIG" ]; then
+          DEFCONFIG=$(find arch/arm64/configs \
+          -type f -name "*defconfig*" | head -n1)
         fi
 
-        echo "Using $CFG"
+        echo "Using $DEFCONFIG"
 
-        cp "$CFG" out/.config
-
-
-        make O=out \
-        ARCH=arm64 \
+        make O=out ARCH=arm64 \
         LLVM=1 \
         LLVM_IAS=1 \
-        olddefconfig
-
-
-
-    - name: Clang 18 Fix
-      run: |
-
-        # spinlock clang 18
-        sed -i \
-        's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
-        arch/arm64/include/asm/spinlock.h || true
-
-
-        # stack pointer clang 18
-        python3 - <<'PY'
-from pathlib import Path
-
-p=Path("arch/arm64/include/asm/stack_pointer.h")
-
-if p.exists():
-    s=p.read_text()
-
-    s=s.replace(
-    'register unsigned long current_stack_pointer asm ("sp");',
-    'static inline unsigned long get_current_stack_pointer(void) { \
-    unsigned long sp; \
-    asm volatile("mov %0, sp" : "=r"(sp)); \
-    return sp; \
-    }'
-    )
-
-    p.write_text(s)
-
-PY
-
-
+        $(basename $DEFCONFIG)
 
     - name: Build Kernel
       run: |
 
         export PATH=/usr/lib/llvm-18/bin:$PATH
 
-        set -o pipefail
-
-        make O=out \
+        make -j$(nproc) \
+        O=out \
         ARCH=arm64 \
         LLVM=1 \
         LLVM_IAS=1 \
-        CC=clang \
-        LD=ld.lld \
-        AR=llvm-ar \
-        NM=llvm-nm \
-        OBJCOPY=llvm-objcopy \
-        OBJDUMP=llvm-objdump \
-        STRIP=llvm-strip \
         CROSS_COMPILE=aarch64-linux-gnu- \
-        KCFLAGS="-Wno-error -Wno-array-bounds" \
-        -j2 2>&1 | tee build.log
-
+        KCFLAGS="-Wno-error" \
+        2>&1 | tee build.log
 
 
     - name: Check Output
+      if: always()
       run: |
 
         ls -lh out/arch/arm64/boot/
 
-        test -f out/arch/arm64/boot/Image.gz || \
-        test -f out/arch/arm64/boot/Image
+        test -f out/arch/arm64/boot/Image || \
+        test -f out/arch/arm64/boot/Image.gz
 
 
-
-    - name: Upload
+    - name: Upload Kernel
       if: always()
       uses: actions/upload-artifact@v4
       with:
@@ -143,4 +89,3 @@ PY
           out/arch/arm64/boot/*
           out/.config
           build.log
-        if-no-files-found: warn

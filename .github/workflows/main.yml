@@ -1,4 +1,4 @@
-name: Realme 5i Trinket Kernel Build
+name: Realme5i Kernel Build
 
 on:
   workflow_dispatch:
@@ -8,169 +8,25 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
 
-
-      - name: Install dependencies
+      - name: Install packages
         run: |
           sudo apt update
-          sudo apt install -y \
-            bc \
-            bison \
-            flex \
-            build-essential \
-            libssl-dev \
-            libelf-dev \
-            python3 \
-            wget \
-            gcc-aarch64-linux-gnu
+          sudo apt install -y bc bison flex build-essential libssl-dev libelf-dev python3 wget gcc-aarch64-linux-gnu
 
-
-      - name: Install LLVM Clang 18
+      - name: Install Clang 18
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 18
-
           clang-18 --version
-          ld.lld-18 --version
 
-
-      - name: Setup clang
-        run: |
-          sudo update-alternatives \
-            --install /usr/bin/clang clang /usr/bin/clang-18 100
-
-          sudo update-alternatives \
-            --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
-
-          clang --version
-
-
-      - name: Create out directory
+      - name: Create output
         run: |
           mkdir -p out
 
-
-      - name: Load defconfig
+      - name: Build
         run: |
-          if [ -f arch/arm64/configs/vendor/trinket_defconfig ]; then
-            cp arch/arm64/configs/vendor/trinket_defconfig out/.config
-          else
-            cp arch/arm64/configs/trinket_defconfig out/.config
-          fi
-
-          make O=out ARCH=arm64 olddefconfig
-
-
-      - name: Fix duplicate power supply enum
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          f = Path("include/linux/power_supply.h")
-
-          if f.exists():
-              data = f.read_text()
-
-              remove = [
-                  "POWER_SUPPLY_PROP_SHORT_C_BATT_UPDATE_CHANGE",
-                  "POWER_SUPPLY_PROP_SHORT_C_BATT_IN_IDLE",
-                  "POWER_SUPPLY_PROP_SHORT_C_BATT_CV_STATUS"
-              ]
-
-              for item in remove:
-                  first = True
-                  lines = []
-
-                  for line in data.splitlines():
-                      if item in line:
-                          if first:
-                              first = False
-                              lines.append(line)
-                      else:
-                          lines.append(line)
-
-                  data = "\n".join(lines) + "\n"
-
-              f.write_text(data)
-
-          PY
-
-
-      - name: Fix oppo charger header
-        run: |
-          FILE="drivers/power/supply/oppo/charger_ic/oppo_battery_sm6125Q.h"
-
-          if [ -f "$FILE" ]; then
-
-            grep -q "OPPO_BATTERY_SM6125Q_H" "$FILE" || {
-
-              echo "#ifndef OPPO_BATTERY_SM6125Q_H" > temp.h
-              echo "#define OPPO_BATTERY_SM6125Q_H" >> temp.h
-              cat "$FILE" >> temp.h
-              echo "#endif" >> temp.h
-
-              mv temp.h "$FILE"
-
-            }
-
-          fi
-
-
-      - name: Kernel config
-        run: |
-          scripts/config --file out/.config -d CONFIG_WERROR
-
-          scripts/config --file out/.config \
-            -d CONFIG_MODULE_SIG \
-            -d CONFIG_MODULE_SIG_FORCE
-
-          make O=out ARCH=arm64 olddefconfig
-
-
-      - name: Build kernel
-        run: |
-          set -o pipefail
-
-          make \
-            O=out \
-            ARCH=arm64 \
-            CC=clang \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            KCFLAGS="-Wno-error" \
-            -j$(nproc) 2>&1 | tee build.log
-
-
-      - name: Show error
-        if: failure()
-        run: |
-          echo "===== BUILD ERROR ====="
-
-          if [ -f build.log ]; then
-            grep -iE \
-            "error:|fatal:|modpost|undefined|failed" \
-            build.log | tail -100
-          fi
-
-
-      - name: Upload log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
-
-
-      - name: Upload kernel
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: realme5i-kernel
-          path: |
-            out/vmlinux
-            out/arch/arm64/boot/Image
+          make O=out ARCH=arm64 CC=clang-18 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)

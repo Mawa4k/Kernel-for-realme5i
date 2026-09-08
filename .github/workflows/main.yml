@@ -1,20 +1,22 @@
-name: Kernel Build
+name: Realme Trinket Kernel Build (Clang 18)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
 
-    - name: Checkout kernel source
+    - name: Checkout source
       uses: actions/checkout@v4
+
 
     - name: Install dependencies
       run: |
         sudo apt update
+
         sudo apt install -y \
           bc \
           bison \
@@ -24,90 +26,105 @@ jobs:
           libelf-dev \
           dwarves \
           python3 \
-          clang \
-          lld \
-          llvm \
-          gcc-aarch64-linux-gnu
+          gcc-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu
 
-    - name: Prepare output
+
+    - name: Install Clang 18
+      run: |
+        sudo apt install -y \
+          clang-18 \
+          lld-18 \
+          llvm-18
+
+        clang-18 --version
+        ld.lld-18 --version
+
+
+    - name: Setup LLVM tools
+      run: |
+        sudo update-alternatives \
+        --install /usr/bin/clang clang /usr/bin/clang-18 100
+
+        sudo update-alternatives \
+        --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
+
+
+    - name: Create build directory
       run: |
         mkdir -p out
 
-    - name: Setup config
-      run: |
-        cp arch/arm64/configs/vendor/trinket_defconfig out/.config || cp arch/arm64/configs/trinket_defconfig out/.config || true
 
-        make O=out ARCH=arm64 olddefconfig
-
-    - name: Kernel config fixes
+    - name: Load Trinket defconfig
       run: |
+        cp arch/arm64/configs/vendor/trinket_defconfig out/.config
+
+        make O=out \
+        ARCH=arm64 \
+        olddefconfig
+
+
+    - name: Kernel config adjustments
+      run: |
+
         scripts/config --file out/.config \
-          -e CONFIG_MODULES \
-          -e CONFIG_MODULE_UNLOAD \
-          -e CONFIG_MODULE_FORCE_LOAD \
-          -e CONFIG_MODULE_FORCE_UNLOAD
+        -d CONFIG_WERROR
 
         scripts/config --file out/.config \
-          -d CONFIG_MODULE_SIG \
-          -d CONFIG_MODULE_SIG_FORCE \
-          -d CONFIG_WERROR
+        -e CONFIG_MODULES \
+        -e CONFIG_MODULE_UNLOAD \
+        -e CONFIG_MODULE_FORCE_LOAD \
+        -e CONFIG_MODULE_FORCE_UNLOAD
 
-        echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> out/.config
+        scripts/config --file out/.config \
+        -d CONFIG_MODULE_SIG \
+        -d CONFIG_MODULE_SIG_FORCE
 
-        make O=out ARCH=arm64 olddefconfig
+        make O=out \
+        ARCH=arm64 \
+        olddefconfig
 
-    - name: Fix cxd224x section mismatch
+
+    - name: Build Kernel
       run: |
-        echo "Searching cxd224x..."
 
-        grep -R "init_wqueue" -n drivers || true
-
-        FILE=$(grep -rl "init_wqueue" drivers | head -n 1)
-
-        if [ ! -z "$FILE" ]; then
-          echo "Fixing: $FILE"
-
-          sed -i \
-          's/__init[[:space:]]\+init_wqueue/init_wqueue/g' \
-          "$FILE"
-        fi
-
-
-    - name: Build kernel
-      run: |
         set -o pipefail
 
         make \
-          O=out \
-          ARCH=arm64 \
-          CC=clang \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          -j$(nproc) 2>&1 | tee build.log
+        O=out \
+        ARCH=arm64 \
+        CC=clang \
+        LLVM=1 \
+        LLVM_IAS=1 \
+        CROSS_COMPILE=aarch64-linux-gnu- \
+        KCFLAGS="-Wno-error" \
+        -j$(nproc) 2>&1 | tee build.log
 
 
-    - name: Show build errors
-      if: failure()
+    - name: Check Kernel Image
       run: |
-        echo "====== ERROR REPORT ======"
 
-        grep -iE \
-        "error:|fatal:|modpost|undefined|ld.lld|failed" \
-        build.log | tail -200 || true
+        echo "===== OUTPUT ====="
 
-
-    - name: Check output
-      run: |
         ls -lh out/vmlinux || true
-        ls -lh out/arch/arm64/boot/Image || true
+
+        ls -lh \
+        out/arch/arm64/boot/Image || true
 
 
-    - name: Upload kernel files
+    - name: Upload Build Log
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-build-output
+        name: build-log
+        path: build.log
+
+
+    - name: Upload Kernel
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: realme-trinket-kernel
         path: |
           out/vmlinux
           out/arch/arm64/boot/Image
-          build.log

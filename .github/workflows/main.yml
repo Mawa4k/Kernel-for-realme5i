@@ -16,7 +16,7 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32z1-dev libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zlib1g-dev python3
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zlib1g-dev python3
 
       - name: Setup Clang Toolchain (Clang 18+)
         run: |
@@ -34,7 +34,7 @@ jobs:
           # আপনার ডিফকনফিগ ফাইল ফাইন্ড আউট করে এখানে বসাবেন (যেমন: trinket_defconfig)
           make O=out trinket_defconfig
           
-          # যদি ডিফকনফিগে স্ক্রিনশটের কোডগুলো ম্যানুয়ালি যুক্ত করতে না চান, তবে স্ক্রিপ্ট দিয়েও করা যায়:
+          # আপনার স্ক্রিনশটের নির্দেশ অনুযায়ী ডিফকনফিগে কনফিগারেশন যুক্ত করা
           echo "CONFIG_MODULES=y" >> out/.config
           echo "CONFIG_MODULE_FORCE_LOAD=y" >> out/.config
           echo "CONFIG_MODULE_UNLOAD=y" >> out/.config
@@ -50,3 +50,4 @@ jobs:
         with:
           name: Image.gz-dtb
           path: out/arch/arm64/boot/Image.gz-dtb
+          

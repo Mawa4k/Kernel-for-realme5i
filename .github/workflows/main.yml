@@ -33,44 +33,45 @@ jobs:
           gcc-aarch64-linux-gnu
 
 
-    - name: Check Toolchain
+    - name: Toolchain Version
       run: |
         clang-18 --version
         ld.lld-18 --version
 
 
-    - name: Clean Kernel Tree
+    - name: Clean Source Tree
       run: |
+        git reset --hard HEAD
         git clean -xfd
 
-        make mrproper
+        make ARCH=arm64 mrproper
 
 
-    - name: Prepare Kernel Config
+    - name: Prepare Config
       run: |
         mkdir -p out
 
         cp arch/arm64/configs/defconfig out/.config
 
+        export KBUILD_OUTPUT=$PWD/out
+
         scripts/config --disable WERROR || true
         scripts/config --disable MODULE_SIG || true
         scripts/config --disable MODULE_SIG_FORCE || true
 
-        make O=out \
-          ARCH=arm64 \
-          olddefconfig
+        make ARCH=arm64 olddefconfig
 
 
     - name: Patch Clang 18 Compatibility
       run: |
 
-        # Fix ARM64 spinlock clang immediate constraint
+        # ARM64 spinlock fix for clang 18
         sed -i \
         's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
 
 
-        # Fix old kernel signal array warning
+        # signal.h array bounds fix
         sed -i \
         's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
         include/linux/signal.h || true
@@ -80,8 +81,9 @@ jobs:
       run: |
 
         export PATH=/usr/lib/llvm-18/bin:$PATH
+        export KBUILD_OUTPUT=$PWD/out
 
-        make O=out \
+        make \
           ARCH=arm64 \
           LLVM=1 \
           LLVM_IAS=1 \
@@ -94,24 +96,24 @@ jobs:
         exit ${PIPESTATUS[0]}
 
 
-    - name: Check Kernel Image
+    - name: Check Output
       run: |
 
         ls -lh out/arch/arm64/boot/
 
         if [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Image.gz found"
+          echo "Kernel Image.gz OK"
 
         elif [ -f out/arch/arm64/boot/Image ]; then
-          echo "Image found"
+          echo "Kernel Image OK"
 
         else
-          echo "Kernel image not found"
+          echo "Kernel Image missing"
           exit 1
         fi
 
 
-    - name: Upload Kernel Output
+    - name: Upload Kernel
       uses: actions/upload-artifact@v4
       with:
         name: Realme5i-Kernel

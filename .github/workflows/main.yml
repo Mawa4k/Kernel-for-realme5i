@@ -16,10 +16,10 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y \
-          build-essential \
           bc \
           bison \
           flex \
+          build-essential \
           libssl-dev \
           libelf-dev \
           dwarves \
@@ -29,34 +29,17 @@ jobs:
           llvm \
           gcc-aarch64-linux-gnu
 
-    - name: Setup clang environment
-      run: |
-        clang --version
-        ld.lld --version
-
-    - name: Create output directory
+    - name: Prepare output
       run: |
         mkdir -p out
 
-    - name: Load kernel config
+    - name: Setup config
       run: |
-        cp arch/arm64/configs/vendor/trinket_defconfig out/.config || true
+        cp arch/arm64/configs/vendor/trinket_defconfig out/.config || cp arch/arm64/configs/trinket_defconfig out/.config || true
+
         make O=out ARCH=arm64 olddefconfig
 
-    - name: Fix cxd224x section mismatch
-      run: |
-        echo "Searching init_wqueue..."
-        grep -R "init_wqueue" -n drivers || true
-
-        FILE=$(grep -rl "init_wqueue" drivers | head -n 1)
-
-        if [ -n "$FILE" ]; then
-          echo "Patching $FILE"
-          sed -i 's/__init init_wqueue/init_wqueue/g' "$FILE"
-          sed -i 's/__init[[:space:]]*init_wqueue/init_wqueue/g' "$FILE"
-        fi
-
-    - name: Enable module support options
+    - name: Kernel config fixes
       run: |
         scripts/config --file out/.config \
           -e CONFIG_MODULES \
@@ -66,12 +49,34 @@ jobs:
 
         scripts/config --file out/.config \
           -d CONFIG_MODULE_SIG \
-          -d CONFIG_MODULE_SIG_FORCE
+          -d CONFIG_MODULE_SIG_FORCE \
+          -d CONFIG_WERROR
+
+        echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> out/.config
 
         make O=out ARCH=arm64 olddefconfig
 
+    - name: Fix cxd224x section mismatch
+      run: |
+        echo "Searching cxd224x..."
+
+        grep -R "init_wqueue" -n drivers || true
+
+        FILE=$(grep -rl "init_wqueue" drivers | head -n 1)
+
+        if [ ! -z "$FILE" ]; then
+          echo "Fixing: $FILE"
+
+          sed -i \
+          's/__init[[:space:]]\+init_wqueue/init_wqueue/g' \
+          "$FILE"
+        fi
+
+
     - name: Build kernel
       run: |
+        set -o pipefail
+
         make \
           O=out \
           ARCH=arm64 \
@@ -79,17 +84,30 @@ jobs:
           LLVM=1 \
           LLVM_IAS=1 \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          -j$(nproc)
+          -j$(nproc) 2>&1 | tee build.log
 
-    - name: Check Image
+
+    - name: Show build errors
+      if: failure()
       run: |
-        ls -lh out/arch/arm64/boot/Image || true
-        ls -lh out/vmlinux || true
+        echo "====== ERROR REPORT ======"
 
-    - name: Upload kernel
+        grep -iE \
+        "error:|fatal:|modpost|undefined|ld.lld|failed" \
+        build.log | tail -200 || true
+
+
+    - name: Check output
+      run: |
+        ls -lh out/vmlinux || true
+        ls -lh out/arch/arm64/boot/Image || true
+
+
+    - name: Upload kernel files
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-output
+        name: kernel-build-output
         path: |
-          out/arch/arm64/boot/Image
           out/vmlinux
+          out/arch/arm64/boot/Image
+          build.log

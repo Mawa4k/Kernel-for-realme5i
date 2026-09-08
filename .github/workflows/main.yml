@@ -7,15 +7,17 @@ on:
       - main
       - master
 
+
 jobs:
 
   build:
 
     runs-on: ubuntu-22.04
 
+
     steps:
 
-    - name: Checkout Source
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
 
 
@@ -24,47 +26,45 @@ jobs:
         sudo apt update
 
         sudo apt install -y \
-        bc \
-        bison \
-        build-essential \
-        ccache \
-        flex \
-        git \
-        libelf-dev \
-        libssl-dev \
-        libncurses-dev \
-        python3 \
-        wget \
-        curl \
-        lzop \
-        unzip
+          bc \
+          bison \
+          build-essential \
+          ccache \
+          flex \
+          git \
+          libelf-dev \
+          libssl-dev \
+          libncurses-dev \
+          python3 \
+          lzop \
+          unzip \
+          clang-18 \
+          llvm-18 \
+          lld-18
 
 
-    - name: Setup Clang 18
+    - name: Setup Clang
       run: |
 
-        mkdir -p $HOME/clang
-        cd $HOME/clang
+        clang-18 --version
+        ld.lld-18 --version
 
 
-        wget -q \
-        https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+        sudo update-alternatives --install \
+        /usr/bin/clang clang \
+        /usr/bin/clang-18 100
 
 
-        tar -xf clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04.tar.xz
-
-
-        mv clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04 clang
-
-
-        echo "$HOME/clang/clang/bin" >> $GITHUB_PATH
+        sudo update-alternatives --install \
+        /usr/bin/ld.lld ld.lld \
+        /usr/bin/ld.lld-18 100
 
 
 
-    - name: Check Kernel Source
+    - name: Check Source
       run: |
 
-        echo "Configs:"
+        echo "ARM64 configs:"
         ls arch/arm64/configs
 
         echo "Vendor configs:"
@@ -100,7 +100,7 @@ jobs:
 
 
 
-        echo "Module config:"
+        echo "Checking modules:"
         grep CONFIG_MODULE out/.config || true
 
 
@@ -110,12 +110,6 @@ jobs:
 
         export ARCH=arm64
         export SUBARCH=arm64
-
-
-        export PATH=$HOME/clang/clang/bin:$PATH
-
-
-        clang --version
 
 
         make -j$(nproc --all) \
@@ -128,10 +122,12 @@ jobs:
 
 
 
-    - name: Check Build Output
+    - name: Verify Kernel Image
       run: |
 
+        echo "Build output:"
         ls -lh out/arch/arm64/boot/
+
 
 
     - name: Upload Kernel Image
@@ -139,7 +135,7 @@ jobs:
 
       with:
 
-        name: Realme5i-Stock-Kernel
+        name: Realme5i-Stock-Kernel-Image
 
         path: |
           out/arch/arm64/boot/Image.gz-dtb

@@ -1,4 +1,4 @@
-name: Realme Trinket Kernel Build Clang18
+name: Realme 5i Trinket Kernel Build
 
 on:
   workflow_dispatch:
@@ -9,223 +9,168 @@ jobs:
 
     steps:
 
-    - name: Checkout Kernel Source
-      uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
 
 
-    - name: Install Dependencies
-      run: |
-        sudo apt update
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            bc \
+            bison \
+            flex \
+            build-essential \
+            libssl-dev \
+            libelf-dev \
+            python3 \
+            wget \
+            gcc-aarch64-linux-gnu
 
-        sudo apt install -y \
-          bc \
-          bison \
-          flex \
-          build-essential \
-          libssl-dev \
-          libelf-dev \
-          dwarves \
-          python3 \
-          wget \
-          gnupg \
-          lsb-release \
-          software-properties-common \
-          gcc-aarch64-linux-gnu
 
+      - name: Install LLVM Clang 18
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
 
-    - name: Install LLVM Clang 18
-      run: |
-        wget https://apt.llvm.org/llvm.sh
+          clang-18 --version
+          ld.lld-18 --version
 
-        chmod +x llvm.sh
 
-        sudo ./llvm.sh 18
+      - name: Setup clang
+        run: |
+          sudo update-alternatives \
+            --install /usr/bin/clang clang /usr/bin/clang-18 100
 
-        clang-18 --version
-        ld.lld-18 --version
+          sudo update-alternatives \
+            --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
 
+          clang --version
 
-    - name: Setup LLVM
-      run: |
-        sudo update-alternatives \
-        --install /usr/bin/clang clang /usr/bin/clang-18 100
 
-        sudo update-alternatives \
-        --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
+      - name: Create out directory
+        run: |
+          mkdir -p out
 
-        clang --version
 
+      - name: Load defconfig
+        run: |
+          if [ -f arch/arm64/configs/vendor/trinket_defconfig ]; then
+            cp arch/arm64/configs/vendor/trinket_defconfig out/.config
+          else
+            cp arch/arm64/configs/trinket_defconfig out/.config
+          fi
 
-    - name: Create Output Directory
-      run: |
-        mkdir -p out
+          make O=out ARCH=arm64 olddefconfig
 
 
-    - name: Load Trinket Defconfig
-      run: |
+      - name: Fix duplicate power supply enum
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
 
-        if [ -f arch/arm64/configs/vendor/trinket_defconfig ]; then
-          cp arch/arm64/configs/vendor/trinket_defconfig out/.config
+          f = Path("include/linux/power_supply.h")
 
-        elif [ -f arch/arm64/configs/trinket_defconfig ]; then
-          cp arch/arm64/configs/trinket_defconfig out/.config
+          if f.exists():
+              data = f.read_text()
 
-        else
-          echo "Defconfig not found"
-          exit 1
-        fi
+              remove = [
+                  "POWER_SUPPLY_PROP_SHORT_C_BATT_UPDATE_CHANGE",
+                  "POWER_SUPPLY_PROP_SHORT_C_BATT_IN_IDLE",
+                  "POWER_SUPPLY_PROP_SHORT_C_BATT_CV_STATUS"
+              ]
 
+              for item in remove:
+                  first = True
+                  lines = []
 
-        make \
-        O=out \
-        ARCH=arm64 \
-        olddefconfig
+                  for line in data.splitlines():
+                      if item in line:
+                          if first:
+                              first = False
+                              lines.append(line)
+                      else:
+                          lines.append(line)
 
+                  data = "\n".join(lines) + "\n"
 
+              f.write_text(data)
 
-    - name: Fix Duplicate power_supply enum
-      run: |
+          PY
 
-        echo "Before fix:"
-        grep -n "POWER_SUPPLY_PROP_SHORT_C_BATT" include/linux/power_supply.h || true
 
+      - name: Fix oppo charger header
+        run: |
+          FILE="drivers/power/supply/oppo/charger_ic/oppo_battery_sm6125Q.h"
 
-        python3 <<'PY'
+          if [ -f "$FILE" ]; then
 
-        from pathlib import Path
+            grep -q "OPPO_BATTERY_SM6125Q_H" "$FILE" || {
 
-        file = Path("include/linux/power_supply.h")
+              echo "#ifndef OPPO_BATTERY_SM6125Q_H" > temp.h
+              echo "#define OPPO_BATTERY_SM6125Q_H" >> temp.h
+              cat "$FILE" >> temp.h
+              echo "#endif" >> temp.h
 
-        data = file.read_text()
+              mv temp.h "$FILE"
 
+            }
 
-        names = [
-            "POWER_SUPPLY_PROP_SHORT_C_BATT_UPDATE_CHANGE",
-            "POWER_SUPPLY_PROP_SHORT_C_BATT_IN_IDLE",
-            "POWER_SUPPLY_PROP_SHORT_C_BATT_CV_STATUS",
-        ]
+          fi
 
 
-        for name in names:
+      - name: Kernel config
+        run: |
+          scripts/config --file out/.config -d CONFIG_WERROR
 
-            found = False
-            result = []
+          scripts/config --file out/.config \
+            -d CONFIG_MODULE_SIG \
+            -d CONFIG_MODULE_SIG_FORCE
 
-            for line in data.splitlines():
+          make O=out ARCH=arm64 olddefconfig
 
-                if name in line:
 
-                    if found:
-                        continue
+      - name: Build kernel
+        run: |
+          set -o pipefail
 
-                    found = True
+          make \
+            O=out \
+            ARCH=arm64 \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            KCFLAGS="-Wno-error" \
+            -j$(nproc) 2>&1 | tee build.log
 
-                result.append(line)
 
+      - name: Show error
+        if: failure()
+        run: |
+          echo "===== BUILD ERROR ====="
 
-            data = "\n".join(result) + "\n"
+          if [ -f build.log ]; then
+            grep -iE \
+            "error:|fatal:|modpost|undefined|failed" \
+            build.log | tail -100
+          fi
 
 
-        file.write_text(data)
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
-        PY
 
-
-        echo "After fix:"
-        grep -n "POWER_SUPPLY_PROP_SHORT_C_BATT" include/linux/power_supply.h || true
-
-
-
-    - name: Kernel Config Fix
-      run: |
-
-        scripts/config --file out/.config \
-        -d CONFIG_WERROR
-
-
-        scripts/config --file out/.config \
-        -d CONFIG_MODULE_SIG \
-        -d CONFIG_MODULE_SIG_FORCE
-
-
-        scripts/config --file out/.config \
-        -e CONFIG_MODULES \
-        -e CONFIG_MODULE_UNLOAD \
-        -e CONFIG_MODULE_FORCE_LOAD \
-        -e CONFIG_MODULE_FORCE_UNLOAD
-
-
-        make \
-        O=out \
-        ARCH=arm64 \
-        olddefconfig
-
-
-
-    - name: Build Kernel
-      run: |
-
-        set -o pipefail
-
-
-        make \
-        O=out \
-        ARCH=arm64 \
-        CC=clang \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        CROSS_COMPILE=aarch64-linux-gnu- \
-        KCFLAGS="-Wno-error" \
-        -j$(nproc) 2>&1 | tee build.log
-
-
-
-    - name: Error Report
-      if: failure()
-      run: |
-
-        echo "========== BUILD ERROR =========="
-
-
-        if [ -f build.log ]; then
-
-          grep -iE \
-          "error:|fatal:|modpost|ld.lld|undefined|failed" \
-          build.log | tail -200
-
-        else
-
-          echo "No build.log found"
-
-        fi
-
-
-
-    - name: Check Kernel Output
-      run: |
-
-        echo "========== OUTPUT =========="
-
-        ls -lh out/vmlinux || true
-
-        ls -lh out/arch/arm64/boot/Image || true
-
-
-
-    - name: Upload Build Log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-build-log
-        path: build.log
-
-
-
-    - name: Upload Kernel Image
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: realme5i-trinket-kernel
-        path: |
-          out/vmlinux
-          out/arch/arm64/boot/Image
+      - name: Upload kernel
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: realme5i-kernel
+          path: |
+            out/vmlinux
+            out/arch/arm64/boot/Image

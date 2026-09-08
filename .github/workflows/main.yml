@@ -16,25 +16,28 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zlib1g-dev python3
+          sudo apt-get install -y bc bison build-essential ccache curl wget flex g++-multilib gcc-multilib git gnupg gperf imagemagick libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zlib1g-dev python3
 
       - name: Setup Clang Toolchain (Clang 18+)
         run: |
           mkdir -p $HOME/clang
           cd $HOME/clang
-          # গিট কনফিগ রিসেট করে অথেন্টিকেশন এরর দূর করা
-          git config --global --unset http.https://github.com/.extraheader || true
-          git config --global --unset http.https://gitlab.com/.extraheader || true
+          # Git ক্লোন বাদ দিয়ে সরাসরি wget দিয়ে AOSP Clang রিলিজ জিপ ডাউনলোড করা
+          wget -O clang.zip https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r510928.tar.gz || \
+          wget -O clang.zip https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928/archive/refs/heads/main.zip
           
-          # বিকল্প ও নিরাপদ উপায়ে সরাসরি গিট ক্লোন করা
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928.git clang
-          echo "$HOME/clang/clang/bin" >> $GITHUB_PATH
+          # ফোল্ডার তৈরি করে এক্সট্রাক্ট করা
+          mkdir -p extracted_clang
+          tar -xzf clang.zip -C extracted_clang || unzip -q clang.zip -d extracted_clang
+          
+          # পাথ সেটআপ
+          echo "$HOME/clang/extracted_clang/bin" >> $GITHUB_PATH
 
       - name: Build Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
-          export PATH=$HOME/clang/clang/bin:$PATH
+          export PATH=$HOME/clang/extracted_clang/bin:$PATH
           
           # ডিফকনফিগ লোড করা
           make O=out trinket_defconfig

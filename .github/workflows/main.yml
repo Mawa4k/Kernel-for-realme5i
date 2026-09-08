@@ -12,9 +12,11 @@ jobs:
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
 
+
     - name: Install Dependencies
       run: |
         sudo apt update
+
         sudo apt install -y \
           bc \
           bison \
@@ -30,10 +32,17 @@ jobs:
           llvm-18 \
           gcc-aarch64-linux-gnu
 
-    - name: Check LLVM Toolchain
+
+    - name: Check Toolchain
       run: |
         clang-18 --version
         ld.lld-18 --version
+
+
+    - name: Clean Source
+      run: |
+        make ARCH=arm64 mrproper || true
+
 
     - name: Prepare Kernel Config
       run: |
@@ -45,18 +54,23 @@ jobs:
         scripts/config --disable MODULE_SIG || true
         scripts/config --disable MODULE_SIG_FORCE || true
 
-        make O=out ARCH=arm64 olddefconfig
+        make O=out \
+          ARCH=arm64 \
+          olddefconfig
 
 
     - name: Patch Clang 18 Compatibility
       run: |
 
-        # Fix ARM64 spinlock immediate constraint
-        sed -i 's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
+        # ARM64 spinlock clang 18 fix
+        sed -i \
+        's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
 
-        # Fix old kernel array bounds warning
-        sed -i 's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
+
+        # signal.h clang array bounds fix
+        sed -i \
+        's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
         include/linux/signal.h || true
 
 
@@ -73,28 +87,33 @@ jobs:
           LD=ld.lld-18 \
           KCFLAGS="-Wno-array-bounds -Wno-error" \
           CFLAGS_KERNEL="-Wno-array-bounds -Wno-error" \
-          -j$(nproc)
+          -j$(nproc) 2>&1 | tee build.log
+
+        exit ${PIPESTATUS[0]}
 
 
-    - name: Verify Kernel Image
+    - name: Check Kernel Image
       run: |
 
         ls -lh out/arch/arm64/boot/
 
         if [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Kernel Image exists"
+          echo "Image.gz OK"
+
         elif [ -f out/arch/arm64/boot/Image ]; then
-          echo "Kernel Image exists"
+          echo "Image OK"
+
         else
           echo "Kernel Image missing"
           exit 1
         fi
 
 
-    - name: Upload Kernel Output
+    - name: Upload Kernel
       uses: actions/upload-artifact@v4
       with:
-        name: realme5i-stock-kernel
+        name: Realme5i-Kernel
         path: |
           out/arch/arm64/boot/*
           out/.config
+          build.log

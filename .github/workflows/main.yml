@@ -1,171 +1,83 @@
-name: Build Realme 5i Stock Kernel
+name: Kernel Build
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
-
 
 jobs:
-
   build:
-
-    runs-on: ubuntu-22.04
-
+    runs-on: ubuntu-latest
 
     steps:
 
-    - name: Checkout Kernel Source
+    - name: Checkout kernel source
       uses: actions/checkout@v4
 
-
-    - name: Install Dependencies
+    - name: Install dependencies
       run: |
-
         sudo apt update
-
         sudo apt install -y \
+          build-essential \
           bc \
           bison \
-          build-essential \
-          ccache \
           flex \
-          git \
-          libelf-dev \
           libssl-dev \
-          libncurses-dev \
+          libelf-dev \
+          gcc-aarch64-linux-gnu \
           python3 \
-          lzop \
-          unzip \
-          wget \
-          curl \
-          gnupg
+          cpio \
+          rsync
 
-
-
-    - name: Install LLVM Clang 18
+    - name: Setup Clang
       run: |
+        sudo apt install -y clang lld llvm
 
-        wget https://apt.llvm.org/llvm.sh
+        clang --version
+        ld.lld --version
 
-        chmod +x llvm.sh
-
-        sudo ./llvm.sh 18
-
-
-        sudo apt install -y \
-          clang-18 \
-          llvm-18 \
-          lld-18
-
-
-
-        clang-18 --version
-
-        ld.lld-18 --version
-
-
-
-        sudo update-alternatives \
-        --install /usr/bin/clang clang \
-        /usr/bin/clang-18 100
-
-
-
-        sudo update-alternatives \
-        --install /usr/bin/ld.lld ld.lld \
-        /usr/bin/ld.lld-18 100
-
-
-
-
-    - name: Check Kernel Config
+    - name: Prepare kernel config
       run: |
-
-        echo "Available configs:"
-        ls arch/arm64/configs
-
-
-        echo "Vendor configs:"
-        ls arch/arm64/configs/vendor || true
-
-
-
-
-    - name: Configure Kernel
-      run: |
-
-        export ARCH=arm64
-
-
         mkdir -p out
 
+        cp vendor/trinket_defconfig out/.config
 
-        make O=out vendor/trinket_defconfig
+        scripts/config --disable WERROR || true
+        scripts/config --disable MODULE_SIG || true
+        scripts/config --disable MODULE_SIG_FORCE || true
 
-
-
-        scripts/config --file out/.config \
-          -e MODULES \
-          -e MODULE_FORCE_LOAD \
-          -e MODULE_UNLOAD \
-          -e MODULE_FORCE_UNLOAD \
-          -d MODULE_SIG \
-          -d MODULE_SIG_FORCE \
-          -d MODULE_SIG_ALL
-
-
-
-        make O=out olddefconfig
-
-
-
-        echo "Module configuration:"
-        grep CONFIG_MODULE out/.config || true
-
-
-
+        make O=out ARCH=arm64 olddefconfig
 
     - name: Build Kernel
       run: |
-
         export ARCH=arm64
-        export SUBARCH=arm64
+        export LLVM=1
+        export LLVM_IAS=1
 
+        export KCFLAGS="-Wno-array-bounds -Wno-error"
+        export CFLAGS_KERNEL="-Wno-array-bounds -Wno-error"
 
-        clang --version
-
-
-        make -j$(nproc --all) \
-          O=out \
+        make O=out \
           ARCH=arm64 \
-          CC=clang \
-          LD=ld.lld \
           LLVM=1 \
-          LLVM_IAS=1
+          LLVM_IAS=1 \
+          KCFLAGS="$KCFLAGS" \
+          CFLAGS_KERNEL="$CFLAGS_KERNEL" \
+          -j$(nproc)
 
-
-
-
-    - name: Check Output
+    - name: Check Kernel Image
       run: |
-
-        echo "Kernel output:"
-
         ls -lh out/arch/arm64/boot/
 
-
-
+        if [ -f out/arch/arm64/boot/Image.gz ]; then
+          echo "Kernel Image exists."
+        else
+          echo "Kernel Image missing!"
+          exit 1
+        fi
 
     - name: Upload Kernel Image
       uses: actions/upload-artifact@v4
-
       with:
-
-        name: Realme5i-Stock-Kernel-Image
-
+        name: realme5i-kernel-image
         path: |
-          out/arch/arm64/boot/Image.gz-dtb
-          out/arch/arm64/boot/Image
+          out/arch/arm64/boot/Image.gz
+          out/.config

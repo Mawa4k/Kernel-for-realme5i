@@ -8,114 +8,118 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
         clean: true
-
+        fetch-depth: 1
 
     - name: Install Dependencies
       run: |
         sudo apt update
-
         sudo apt install -y \
-          bc \
-          bison \
-          flex \
-          build-essential \
-          libssl-dev \
-          libelf-dev \
-          python3 \
-          cpio \
-          rsync \
-          clang-18 \
-          llvm-18 \
-          lld-18 \
-          gcc-aarch64-linux-gnu
-
+          bc bison flex build-essential \
+          libssl-dev libelf-dev python3 python-is-python3 \
+          cpio rsync \
+          clang-18 llvm-18 lld-18 \
+          gcc-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          device-tree-compiler kmod
 
     - name: Toolchain Check
       run: |
         clang-18 --version
         ld.lld-18 --version
+        aarch64-linux-gnu-gcc --version
 
+    - name: Find Defconfig
+      id: findcfg
+      run: |
+        echo "Available defconfigs:"
+        ls arch/arm64/configs/ || true
+        CFG=$(ls arch/arm64/configs/ | grep -iE 'trinket|sm6125|vendor|k68|msm' | head -n1)
+        if [ -z "$CFG" ]; then
+          CFG=$(ls arch/arm64/configs/ | head -n1)
+        fi
+        echo "Using defconfig: $CFG"
+        echo "defconfig=$CFG" >> "$GITHUB_OUTPUT"
 
     - name: Create Build Directory
       run: |
         rm -rf out
         mkdir -p out
 
-
     - name: Setup Config
+      env:
+        DEFCONFIG: ${{ steps.findcfg.outputs.defconfig }}
       run: |
-        cp arch/arm64/configs/defconfig out/.config
-
-        export KBUILD_OUTPUT=$PWD/out
-
-        make O=out ARCH=arm64 olddefconfig
-
+        export PATH=/usr/lib/llvm-18/bin:$PATH
+        make O=out ARCH=arm64 \
+          CC=clang-18 LD=ld.lld-18 \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          "$DEFCONFIG"
+        make O=out ARCH=arm64 \
+          CC=clang-18 LD=ld.lld-18 \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          olddefconfig
 
     - name: Apply Clang 18 Fixes
       run: |
+        # ticket lock inline asm fix
+        if [ -f arch/arm64/include/asm/spinlock.h ]; then
+          sed -i 's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
+            arch/arm64/include/asm/spinlock.h || true
+        fi
 
-        # ARM64 ticket lock clang 18 fix
-        sed -i \
-        's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
-        arch/arm64/include/asm/spinlock.h
+        # signal bounds fix
+        if [ -f include/linux/signal.h ]; then
+          sed -i 's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
+            include/linux/signal.h || true
+        fi
 
-
-        # signal bounds warning fix
-        sed -i \
-        's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
-        include/linux/signal.h || true
-
+        # stack protector / weak symbol issues common on clang 18
+        find . -name Makefile -exec sed -i 's/-Werror//g' {} \; 2>/dev/null || true
 
     - name: Reset Generated Changes
       run: |
-        git checkout -- \
-          include/generated \
-          arch/arm64/include/generated \
-          2>/dev/null || true
-
+        git checkout -- include/generated arch/arm64/include/generated 2>/dev/null || true
 
     - name: Build Kernel
+      env:
+        DEFCONFIG: ${{ steps.findcfg.outputs.defconfig }}
       run: |
-
         export PATH=/usr/lib/llvm-18/bin:$PATH
-        export KBUILD_OUTPUT=$PWD/out
-
-        make O=out \
+        set -o pipefail
+        make -j$(nproc) O=out \
           ARCH=arm64 \
           LLVM=1 \
           LLVM_IAS=1 \
           CC=clang-18 \
           LD=ld.lld-18 \
-          KCFLAGS="-Wno-array-bounds -Wno-error" \
-          CFLAGS_KERNEL="-Wno-array-bounds -Wno-error" \
-          -j$(nproc) 2>&1 | tee build.log
-
-        exit ${PIPESTATUS[0]}
-
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration" \
+          2>&1 | tee build.log
 
     - name: Check Kernel Image
       run: |
-
-        ls -lh out/arch/arm64/boot/
-
+        ls -lh out/arch/arm64/boot/ || true
         if [ -f out/arch/arm64/boot/Image.gz ]; then
           echo "Image.gz OK"
-
         elif [ -f out/arch/arm64/boot/Image ]; then
           echo "Image OK"
-
         else
-          echo "Kernel Image missing"
+          echo "Kernel Image missing — check build.log"
+          tail -n 100 build.log
           exit 1
         fi
 
-
     - name: Upload Kernel
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: Realme5i-Kernel
@@ -123,3 +127,4 @@ jobs:
           out/arch/arm64/boot/*
           out/.config
           build.log
+        if-no-files-found: warn

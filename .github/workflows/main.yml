@@ -55,24 +55,19 @@ jobs:
     - name: Setup Realme 5i Defconfig
       run: |
 
-        echo "Available trinket configs:"
-        find arch/arm64/configs -name "*trinket*"
-
+        export PATH=/usr/lib/llvm-18/bin:$PATH
 
         DEFCONFIG="vendor/trinket_oppo/trinket_defconfig"
 
 
         if [ ! -f "arch/arm64/configs/$DEFCONFIG" ]; then
-          echo "Defconfig not found!"
+          echo "Defconfig not found"
           exit 1
         fi
 
 
-        echo "Using defconfig:"
+        echo "Using:"
         echo $DEFCONFIG
-
-
-        export PATH=/usr/lib/llvm-18/bin:$PATH
 
 
         make O=out \
@@ -84,18 +79,40 @@ jobs:
 
 
 
-    - name: Fix Clang 18 ARM64 Issue
+    - name: Apply Clang 18 Fixes
       run: |
 
+        echo "Applying fixes..."
+
+
+        # ARM64 SP register fix
         FILE="arch/arm64/include/asm/stack_pointer.h"
 
         if [ -f "$FILE" ]; then
 
           sed -i \
           's/register unsigned long current_stack_pointer asm ("sp");/static inline unsigned long current_stack_pointer(void) { unsigned long sp; asm("mov %0, sp" : "=r"(sp)); return sp; }/' \
-          $FILE || true
+          "$FILE" || true
 
         fi
+
+
+
+        # QCOM MDSS PLL format fix
+        PLL="drivers/clk/qcom/mdss/mdss-dsi-pll-14nm-util.c"
+
+        if [ -f "$PLL" ]; then
+
+          sed -i \
+          's/vco_rate=%lu/vco_rate=%u/g' \
+          "$PLL"
+
+        fi
+
+
+
+        # Remove Werror
+        find . -name "Makefile*" -type f -exec sed -i 's/-Werror//g' {} \;
 
 
 
@@ -113,7 +130,7 @@ jobs:
           LLVM=1 \
           LLVM_IAS=1 \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-error -Wno-array-bounds" \
+          KCFLAGS="-Wno-error -Wno-format -Wno-array-bounds -Wno-unused-variable -Wno-implicit-function-declaration" \
           2>&1 | tee build.log
 
 
@@ -122,21 +139,23 @@ jobs:
       if: always()
       run: |
 
-        echo "Checking kernel output..."
-
         ls -lh out/arch/arm64/boot/ || true
 
 
         if [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Image.gz FOUND"
+
+          echo "Image.gz found"
 
         elif [ -f out/arch/arm64/boot/Image ]; then
-          echo "Image FOUND"
+
+          echo "Image found"
 
         else
-          echo "Kernel Image missing"
+
+          echo "Kernel image missing"
           tail -100 build.log
           exit 1
+
         fi
 
 

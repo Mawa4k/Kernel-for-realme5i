@@ -12,32 +12,23 @@ jobs:
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
-        clean: false
+        clean: true
         fetch-depth: 1
-
 
     - name: Install Dependencies
       run: |
         sudo apt update
 
         sudo apt install -y \
-          bc \
-          bison \
-          flex \
-          build-essential \
-          libssl-dev \
-          libelf-dev \
-          python3 \
-          python-is-python3 \
-          cpio \
-          rsync \
-          clang-18 \
-          llvm-18 \
-          lld-18 \
+          bc bison flex build-essential \
+          libssl-dev libelf-dev \
+          python3 python-is-python3 \
+          cpio rsync \
+          clang-18 llvm-18 lld-18 \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          device-tree-compiler
-
+          device-tree-compiler \
+          kmod
 
     - name: Toolchain Check
       run: |
@@ -46,80 +37,127 @@ jobs:
         aarch64-linux-gnu-gcc --version
 
 
-    - name: Create Output Directory
-      run: |
-        rm -rf out
-        mkdir -p out
-
-
-    - name: Setup Realme 5i Defconfig
+    - name: Find Defconfig
+      id: findcfg
       run: |
 
-        export PATH=/usr/lib/llvm-18/bin:$PATH
+        echo "Searching defconfig..."
 
-        DEFCONFIG="vendor/trinket_oppo/trinket_defconfig"
+        find arch/arm64/configs -type f -name '*defconfig*' | sort
 
 
-        if [ ! -f "arch/arm64/configs/$DEFCONFIG" ]; then
-          echo "Defconfig not found"
+        CFG="arch/arm64/configs/vendor/trinket_oppo/trinket-perf_defconfig"
+
+
+        if [ ! -f "$CFG" ]; then
+          CFG="arch/arm64/configs/vendor/trinket_oppo/trinket_defconfig"
+        fi
+
+
+        if [ ! -f "$CFG" ]; then
+          echo "Defconfig not found!"
           exit 1
         fi
 
 
         echo "Using:"
-        echo $DEFCONFIG
+        echo "$CFG"
 
 
-        make O=out \
-          ARCH=arm64 \
-          LLVM=1 \
-          LLVM_IAS=1 \
+        REL=$(echo "$CFG" | sed 's|arch/arm64/configs/||')
+
+
+        echo "defconfig=$REL" >> $GITHUB_OUTPUT
+
+
+
+    - name: Create Out Directory
+      run: |
+        rm -rf out
+        mkdir out
+
+
+
+    - name: Setup Kernel Config
+      env:
+        DEFCONFIG: ${{ steps.findcfg.outputs.defconfig }}
+
+      run: |
+
+        export PATH=/usr/lib/llvm-18/bin:$PATH
+
+
+        make O=out ARCH=arm64 \
+          CC=clang-18 \
+          LD=ld.lld-18 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           $DEFCONFIG
 
 
 
-    - name: Apply Clang 18 Fixes
+        echo "Disable stack protector"
+
+
+        ./scripts/config --file out/.config \
+          --disable CONFIG_CC_STACKPROTECTOR_STRONG \
+          --disable CONFIG_CC_STACKPROTECTOR_REGULAR \
+          --enable CONFIG_CC_STACKPROTECTOR_NONE \
+          --disable CONFIG_STACK_VALIDATION
+
+
+
+        sed -i \
+        -e 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' \
+        -e 's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/# CONFIG_CC_STACKPROTECTOR_REGULAR is not set/' \
+        out/.config
+
+
+
+        yes "" | make O=out ARCH=arm64 \
+          CC=clang-18 \
+          LD=ld.lld-18 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          olddefconfig
+
+
+
+        echo "Final config:"
+        grep STACKPROTECTOR out/.config || true
+
+
+
+    - name: Apply Clang Fix
       run: |
 
-        echo "Applying fixes..."
 
-
-        # ARM64 SP register fix
-        FILE="arch/arm64/include/asm/stack_pointer.h"
-
-        if [ -f "$FILE" ]; then
+        if [ -f arch/arm64/include/asm/spinlock.h ]; then
 
           sed -i \
-          's/register unsigned long current_stack_pointer asm ("sp");/static inline unsigned long current_stack_pointer(void) { unsigned long sp; asm("mov %0, sp" : "=r"(sp)); return sp; }/' \
-          "$FILE" || true
+          's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
+          arch/arm64/include/asm/spinlock.h || true
 
         fi
 
 
 
-        # QCOM MDSS PLL format fix
-        PLL="drivers/clk/qcom/mdss/mdss-dsi-pll-14nm-util.c"
-
-        if [ -f "$PLL" ]; then
+        if [ -f include/linux/signal.h ]; then
 
           sed -i \
-          's/vco_rate=%lu/vco_rate=%u/g' \
-          "$PLL"
+          's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
+          include/linux/signal.h || true
 
         fi
-
-
-
-        # Remove Werror
-        find . -name "Makefile*" -type f -exec sed -i 's/-Werror//g' {} \;
 
 
 
     - name: Build Kernel
+
       run: |
 
         export PATH=/usr/lib/llvm-18/bin:$PATH
+
 
         set -o pipefail
 
@@ -129,14 +167,22 @@ jobs:
           ARCH=arm64 \
           LLVM=1 \
           LLVM_IAS=1 \
+          CC=clang-18 \
+          LD=ld.lld-18 \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-error -Wno-format -Wno-array-bounds -Wno-unused-variable -Wno-implicit-function-declaration" \
+          KCFLAGS="-Wno-error -Wno-format -Wno-array-bounds -Wno-unused-variable" \
           2>&1 | tee build.log
 
 
 
     - name: Check Kernel Image
-      if: always()
+
       run: |
 
         ls -lh out/arch/arm64/boot/ || true
@@ -152,8 +198,10 @@ jobs:
 
         else
 
-          echo "Kernel image missing"
+          echo "Kernel Image missing"
+
           tail -100 build.log
+
           exit 1
 
         fi
@@ -161,7 +209,9 @@ jobs:
 
 
     - name: Upload Kernel
+
       if: always()
+
       uses: actions/upload-artifact@v4
 
       with:
@@ -169,8 +219,11 @@ jobs:
         name: Realme5i-Kernel
 
         path: |
+
           out/arch/arm64/boot/*
+
           out/.config
+
           build.log
 
         if-no-files-found: warn

@@ -69,11 +69,18 @@ jobs:
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           "$DEFCONFIG"
-        make O=out ARCH=arm64 \
+
+        # Properly disable STRONG / enable REGULAR stackprotector using kernel's own config tool
+        ./scripts/config --file out/.config \
+          -d CC_STACKPROTECTOR_STRONG \
+          -e CC_STACKPROTECTOR_REGULAR
+
+        # Non-interactive resync — 'yes ""' auto-answers any leftover prompt with default
+        yes "" | make O=out ARCH=arm64 \
           CC=clang-18 LD=ld.lld-18 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          olddefconfig
+          oldconfig
 
     - name: Apply Clang 18 Fixes
       run: |
@@ -88,11 +95,6 @@ jobs:
         fi
 
         find . -name Makefile -exec sed -i 's/-Werror//g' {} \; 2>/dev/null || true
-
-        # Fallback: if stackprotector-strong still fails compiler-check, downgrade it
-        if [ -f out/.config ]; then
-          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_REGULAR=y/' out/.config || true
-        fi
 
     - name: Reset Generated Changes
       run: |

@@ -54,15 +54,14 @@ jobs:
         --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
 
         clang --version
-        ld.lld --version
 
 
-    - name: Create Out Directory
+    - name: Create Output Directory
       run: |
         mkdir -p out
 
 
-    - name: Setup Trinket Defconfig
+    - name: Load Trinket Defconfig
       run: |
 
         if [ -f arch/arm64/configs/vendor/trinket_defconfig ]; then
@@ -84,7 +83,60 @@ jobs:
 
 
 
-    - name: Fix Old Kernel Config
+    - name: Fix Duplicate power_supply enum
+      run: |
+
+        echo "Before fix:"
+        grep -n "POWER_SUPPLY_PROP_SHORT_C_BATT" include/linux/power_supply.h || true
+
+
+        python3 <<'PY'
+
+        from pathlib import Path
+
+        file = Path("include/linux/power_supply.h")
+
+        data = file.read_text()
+
+
+        names = [
+            "POWER_SUPPLY_PROP_SHORT_C_BATT_UPDATE_CHANGE",
+            "POWER_SUPPLY_PROP_SHORT_C_BATT_IN_IDLE",
+            "POWER_SUPPLY_PROP_SHORT_C_BATT_CV_STATUS",
+        ]
+
+
+        for name in names:
+
+            found = False
+            result = []
+
+            for line in data.splitlines():
+
+                if name in line:
+
+                    if found:
+                        continue
+
+                    found = True
+
+                result.append(line)
+
+
+            data = "\n".join(result) + "\n"
+
+
+        file.write_text(data)
+
+        PY
+
+
+        echo "After fix:"
+        grep -n "POWER_SUPPLY_PROP_SHORT_C_BATT" include/linux/power_supply.h || true
+
+
+
+    - name: Kernel Config Fix
       run: |
 
         scripts/config --file out/.config \
@@ -115,6 +167,7 @@ jobs:
 
         set -o pipefail
 
+
         make \
         O=out \
         ARCH=arm64 \
@@ -133,6 +186,7 @@ jobs:
 
         echo "========== BUILD ERROR =========="
 
+
         if [ -f build.log ]; then
 
           grep -iE \
@@ -147,7 +201,7 @@ jobs:
 
 
 
-    - name: Check Kernel Image
+    - name: Check Kernel Output
       run: |
 
         echo "========== OUTPUT =========="
@@ -167,7 +221,7 @@ jobs:
 
 
 
-    - name: Upload Kernel
+    - name: Upload Kernel Image
       if: success()
       uses: actions/upload-artifact@v4
       with:

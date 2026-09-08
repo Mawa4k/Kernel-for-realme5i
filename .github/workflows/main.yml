@@ -5,13 +5,14 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
 
-    - name: Checkout Kernel
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
+      with:
+        clean: true
 
 
     - name: Install Dependencies
@@ -29,8 +30,8 @@ jobs:
           cpio \
           rsync \
           clang-18 \
-          lld-18 \
           llvm-18 \
+          lld-18 \
           gcc-aarch64-linux-gnu
 
 
@@ -40,61 +41,42 @@ jobs:
         ld.lld-18 --version
 
 
-    - name: Clean Output Only
+    - name: Create Build Directory
       run: |
         rm -rf out
         mkdir -p out
 
 
-    - name: Disable Realme Dirty Source Check
+    - name: Setup Config
       run: |
-        python3 - <<'PY'
-        from pathlib import Path
-
-        p = Path("Makefile")
-        s = p.read_text()
-
-        s = s.replace(
-            "echo >&2 \"  .. is not clean, please run 'make mrproper'\";",
-            "true;"
-        )
-
-        s = s.replace(
-            "echo >&2 \"  in the '..' directory.\";",
-            "true;"
-        )
-
-        p.write_text(s)
-
-        print("prepare3 check patched")
-        PY
-
-
-    - name: Prepare Config
-      run: |
-
         cp arch/arm64/configs/defconfig out/.config
 
         export KBUILD_OUTPUT=$PWD/out
 
-        scripts/config --disable WERROR || true
-        scripts/config --disable MODULE_SIG || true
-        scripts/config --disable MODULE_SIG_FORCE || true
-
         make O=out ARCH=arm64 olddefconfig
 
 
-    - name: Clang 18 Fix
+    - name: Apply Clang 18 Fixes
       run: |
 
+        # ARM64 ticket lock clang 18 fix
         sed -i \
         's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
 
 
+        # signal bounds warning fix
         sed -i \
         's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
         include/linux/signal.h || true
+
+
+    - name: Reset Generated Changes
+      run: |
+        git checkout -- \
+          include/generated \
+          arch/arm64/include/generated \
+          2>/dev/null || true
 
 
     - name: Build Kernel
@@ -116,16 +98,16 @@ jobs:
         exit ${PIPESTATUS[0]}
 
 
-    - name: Check Image
+    - name: Check Kernel Image
       run: |
 
         ls -lh out/arch/arm64/boot/
 
         if [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Kernel Image OK"
+          echo "Image.gz OK"
 
         elif [ -f out/arch/arm64/boot/Image ]; then
-          echo "Kernel Image OK"
+          echo "Image OK"
 
         else
           echo "Kernel Image missing"

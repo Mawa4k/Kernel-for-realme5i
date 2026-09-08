@@ -1,4 +1,4 @@
-name: Kernel Build
+name: Realme 5i Kernel Build
 
 on:
   workflow_dispatch:
@@ -9,75 +9,67 @@ jobs:
 
     steps:
 
-    - name: Checkout kernel source
+    - name: Checkout source
       uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          build-essential \
           bc \
           bison \
           flex \
+          build-essential \
           libssl-dev \
           libelf-dev \
-          gcc-aarch64-linux-gnu \
           python3 \
           cpio \
-          rsync
+          rsync \
+          clang-18 \
+          lld-18 \
+          llvm-18 \
+          gcc-aarch64-linux-gnu
 
-    - name: Setup Clang
+    - name: Check toolchain
       run: |
-        sudo apt install -y clang lld llvm
+        clang-18 --version
+        ld.lld-18 --version
 
-        clang --version
-        ld.lld --version
-
-    - name: Prepare kernel config
+    - name: Prepare config
       run: |
         mkdir -p out
 
-        cp vendor/trinket_defconfig out/.config
+        cp arch/arm64/configs/defconfig out/.config
 
-        scripts/config --disable WERROR || true
-        scripts/config --disable MODULE_SIG || true
-        scripts/config --disable MODULE_SIG_FORCE || true
+        sed -i 's/CONFIG_WERROR=y/# CONFIG_WERROR is not set/' out/.config || true
+        sed -i 's/CONFIG_MODULE_SIG=y/# CONFIG_MODULE_SIG is not set/' out/.config || true
+        sed -i 's/CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' out/.config || true
 
         make O=out ARCH=arm64 olddefconfig
 
-    - name: Build Kernel
+    - name: Build kernel
       run: |
-        export ARCH=arm64
-        export LLVM=1
-        export LLVM_IAS=1
-
-        export KCFLAGS="-Wno-array-bounds -Wno-error"
-        export CFLAGS_KERNEL="-Wno-array-bounds -Wno-error"
+        export PATH=/usr/lib/llvm-18/bin:$PATH
 
         make O=out \
           ARCH=arm64 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="$KCFLAGS" \
-          CFLAGS_KERNEL="$CFLAGS_KERNEL" \
+          CC=clang-18 \
+          LD=ld.lld-18 \
+          KCFLAGS="-Wno-array-bounds -Wno-error" \
           -j$(nproc)
 
-    - name: Check Kernel Image
+    - name: Check Image
       run: |
         ls -lh out/arch/arm64/boot/
 
-        if [ -f out/arch/arm64/boot/Image.gz ]; then
-          echo "Kernel Image exists."
-        else
-          echo "Kernel Image missing!"
-          exit 1
-        fi
+        test -f out/arch/arm64/boot/Image.gz && echo "Kernel Image OK"
 
-    - name: Upload Kernel Image
+    - name: Upload Kernel
       uses: actions/upload-artifact@v4
       with:
-        name: realme5i-kernel-image
+        name: realme5i-stock-kernel
         path: |
           out/arch/arm64/boot/Image.gz
           out/.config

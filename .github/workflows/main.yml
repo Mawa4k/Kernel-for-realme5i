@@ -31,9 +31,6 @@ jobs:
         clang-18 --version
         ld.lld-18 --version
         aarch64-linux-gnu-gcc --version
-        echo 'int main(){return 0;}' | clang-18 --target=aarch64-linux-gnu -fstack-protector -x c -c -o /tmp/test.o - \
-          && echo "Clang cross-compile stackprotector test: OK" \
-          || echo "Clang cross-compile stackprotector test: FAILED (expected — will disable stackprotector)"
 
     - name: Find Defconfig
       id: findcfg
@@ -73,7 +70,6 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           "$DEFCONFIG"
 
-        # Disable stackprotector entirely — avoids the broken compiler-check with clang cross-compile
         ./scripts/config --file out/.config \
           -d CC_STACKPROTECTOR_STRONG \
           -d CC_STACKPROTECTOR_REGULAR \
@@ -96,8 +92,6 @@ jobs:
           sed -i 's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
             include/linux/signal.h || true
         fi
-
-        find . -name Makefile -exec sed -i 's/-Werror//g' {} \; 2>/dev/null || true
 
     - name: Reset Generated Changes
       run: |

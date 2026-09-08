@@ -22,22 +22,20 @@ jobs:
         run: |
           mkdir -p $HOME/clang
           cd $HOME/clang
-          # Git ক্লোন বাদ দিয়ে সরাসরি wget দিয়ে AOSP Clang রিলিজ জিপ ডাউনলোড করা
-          wget -O clang.zip https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r510928.tar.gz || \
-          wget -O clang.zip https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928/archive/refs/heads/main.zip
           
-          # ফোল্ডার তৈরি করে এক্সট্রাক্ট করা
-          mkdir -p extracted_clang
-          tar -xzf clang.zip -C extracted_clang || unzip -q clang.zip -d extracted_clang
+          # গিট যাতে কোনো পাসওয়ার্ড বা ইউজারনেম প্রম্পট না করে, তার জন্য কনফিগার করা
+          git config --global credential.helper ""
           
-          # পাথ সেটআপ
-          echo "$HOME/clang/extracted_clang/bin" >> $GITHUB_PATH
+          # সরাসরি একটি রিয়েল ও ওয়ার্কিং AOSP Clang রিপোজিটরি ক্লোন করা
+          git clone --depth=1 https://gitlab.com/LeLexDev/aosp-clang.git clang
+          
+          echo "$HOME/clang/clang/bin" >> $GITHUB_PATH
 
       - name: Build Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
-          export PATH=$HOME/clang/extracted_clang/bin:$PATH
+          export PATH=$HOME/clang/clang/bin:$PATH
           
           # ডিফকনফিগ লোড করা
           make O=out trinket_defconfig

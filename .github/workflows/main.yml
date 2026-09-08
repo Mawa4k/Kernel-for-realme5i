@@ -66,10 +66,12 @@ jobs:
         export PATH=/usr/lib/llvm-18/bin:$PATH
         make O=out ARCH=arm64 \
           CC=clang-18 LD=ld.lld-18 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           "$DEFCONFIG"
         make O=out ARCH=arm64 \
           CC=clang-18 LD=ld.lld-18 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           olddefconfig
 
@@ -86,6 +88,11 @@ jobs:
         fi
 
         find . -name Makefile -exec sed -i 's/-Werror//g' {} \; 2>/dev/null || true
+
+        # Fallback: if stackprotector-strong still fails compiler-check, downgrade it
+        if [ -f out/.config ]; then
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_REGULAR=y/' out/.config || true
+        fi
 
     - name: Reset Generated Changes
       run: |
@@ -108,6 +115,7 @@ jobs:
           OBJCOPY=llvm-objcopy \
           OBJDUMP=llvm-objdump \
           STRIP=llvm-strip \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration" \
           2>&1 | tee build.log

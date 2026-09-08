@@ -1,4 +1,4 @@
-name: Realme Trinket Kernel Build (Clang 18)
+name: Realme Trinket Kernel Build Clang18
 
 on:
   workflow_dispatch:
@@ -9,11 +9,11 @@ jobs:
 
     steps:
 
-    - name: Checkout source
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
 
 
-    - name: Install dependencies
+    - name: Install Dependencies
       run: |
         sudo apt update
 
@@ -26,49 +26,60 @@ jobs:
           libelf-dev \
           dwarves \
           python3 \
-          gcc-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu
+          wget \
+          xz-utils \
+          gcc-aarch64-linux-gnu
 
 
-    - name: Install Clang 18
+    - name: Install Clang LLVM 18
       run: |
-        sudo apt install -y \
-          clang-18 \
-          lld-18 \
-          llvm-18
 
-        clang-18 --version
-        ld.lld-18 --version
+        wget -q \
+        https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04.tar.xz
 
+        tar -xf clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04.tar.xz
 
-    - name: Setup LLVM tools
-      run: |
-        sudo update-alternatives \
-        --install /usr/bin/clang clang /usr/bin/clang-18 100
+        mv \
+        clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04 \
+        llvm18
 
-        sudo update-alternatives \
-        --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
+        echo "$PWD/llvm18/bin" >> $GITHUB_PATH
+
+        clang --version
+        ld.lld --version
 
 
-    - name: Create build directory
+    - name: Prepare Build Directory
       run: |
         mkdir -p out
 
 
-    - name: Load Trinket defconfig
+    - name: Load Trinket Defconfig
       run: |
-        cp arch/arm64/configs/vendor/trinket_defconfig out/.config
 
-        make O=out \
+        if [ -f arch/arm64/configs/vendor/trinket_defconfig ]; then
+
+          cp arch/arm64/configs/vendor/trinket_defconfig out/.config
+
+        else
+
+          cp arch/arm64/configs/trinket_defconfig out/.config
+
+        fi
+
+
+        make \
+        O=out \
         ARCH=arm64 \
         olddefconfig
 
 
-    - name: Kernel config adjustments
+    - name: Kernel Config Fix
       run: |
 
         scripts/config --file out/.config \
         -d CONFIG_WERROR
+
 
         scripts/config --file out/.config \
         -e CONFIG_MODULES \
@@ -76,11 +87,14 @@ jobs:
         -e CONFIG_MODULE_FORCE_LOAD \
         -e CONFIG_MODULE_FORCE_UNLOAD
 
+
         scripts/config --file out/.config \
         -d CONFIG_MODULE_SIG \
         -d CONFIG_MODULE_SIG_FORCE
 
-        make O=out \
+
+        make \
+        O=out \
         ARCH=arm64 \
         olddefconfig
 
@@ -89,6 +103,7 @@ jobs:
       run: |
 
         set -o pipefail
+
 
         make \
         O=out \
@@ -101,15 +116,25 @@ jobs:
         -j$(nproc) 2>&1 | tee build.log
 
 
-    - name: Check Kernel Image
+    - name: Show Errors If Failed
+      if: failure()
       run: |
 
-        echo "===== OUTPUT ====="
+        echo "========== ERRORS =========="
+
+        grep -iE \
+        "error:|fatal:|modpost|ld.lld|undefined" \
+        build.log || true
+
+
+    - name: Check Kernel Output
+      run: |
+
+        echo "========== OUTPUT =========="
 
         ls -lh out/vmlinux || true
 
-        ls -lh \
-        out/arch/arm64/boot/Image || true
+        ls -lh out/arch/arm64/boot/Image || true
 
 
     - name: Upload Build Log
@@ -120,11 +145,11 @@ jobs:
         path: build.log
 
 
-    - name: Upload Kernel
+    - name: Upload Kernel Image
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: realme-trinket-kernel
+        name: realme-trinket-kernel-clang18
         path: |
           out/vmlinux
           out/arch/arm64/boot/Image

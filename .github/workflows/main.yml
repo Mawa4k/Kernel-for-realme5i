@@ -23,10 +23,10 @@ jobs:
           mkdir -p $HOME/clang
           cd $HOME/clang
           
-          # গিট ক্রেডেনশিয়াল প্রম্পট এড়ানোর জন্য কনফিগ ঠিক করা
-          git config --global credential.helper ""
+          # গিটহাবের অতিরিক্ত হেডার ও ক্রেডেনশিয়াল গ্লোবালি ক্লিয়ার করা যাতে এক্সটার্নাল ক্লোনে বাধা না দেয়
+          git config --global --unset http.https://github.com/.extraheader || true
           
-          # সরাসরি লাইনআউটের AOSP Clang রিপোজিটরি ক্লোন করা
+          # ক্লোন করার সময় জেনুইন ইউআরএল ব্যবহার করা
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928.git clang
           
           echo "$HOME/clang/clang/bin" >> $GITHUB_PATH

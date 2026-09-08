@@ -1,4 +1,4 @@
-name: Realme 5i Kernel Build
+name: Realme 5i Stock Kernel Build
 
 on:
   workflow_dispatch:
@@ -9,10 +9,10 @@ jobs:
 
     steps:
 
-    - name: Checkout source
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: Install Dependencies
       run: |
         sudo apt update
         sudo apt install -y \
@@ -30,25 +30,39 @@ jobs:
           llvm-18 \
           gcc-aarch64-linux-gnu
 
-    - name: Check toolchain
+    - name: Check LLVM Toolchain
       run: |
         clang-18 --version
         ld.lld-18 --version
 
-    - name: Prepare config
+    - name: Prepare Kernel Config
       run: |
         mkdir -p out
 
         cp arch/arm64/configs/defconfig out/.config
 
-        sed -i 's/CONFIG_WERROR=y/# CONFIG_WERROR is not set/' out/.config || true
-        sed -i 's/CONFIG_MODULE_SIG=y/# CONFIG_MODULE_SIG is not set/' out/.config || true
-        sed -i 's/CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' out/.config || true
+        scripts/config --disable WERROR || true
+        scripts/config --disable MODULE_SIG || true
+        scripts/config --disable MODULE_SIG_FORCE || true
 
         make O=out ARCH=arm64 olddefconfig
 
-    - name: Build kernel
+
+    - name: Patch Clang 18 Compatibility
       run: |
+
+        # Fix ARM64 spinlock immediate constraint
+        sed -i 's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
+        arch/arm64/include/asm/spinlock.h
+
+        # Fix old kernel array bounds warning
+        sed -i 's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
+        include/linux/signal.h || true
+
+
+    - name: Build Kernel
+      run: |
+
         export PATH=/usr/lib/llvm-18/bin:$PATH
 
         make O=out \
@@ -58,18 +72,29 @@ jobs:
           CC=clang-18 \
           LD=ld.lld-18 \
           KCFLAGS="-Wno-array-bounds -Wno-error" \
+          CFLAGS_KERNEL="-Wno-array-bounds -Wno-error" \
           -j$(nproc)
 
-    - name: Check Image
+
+    - name: Verify Kernel Image
       run: |
+
         ls -lh out/arch/arm64/boot/
 
-        test -f out/arch/arm64/boot/Image.gz && echo "Kernel Image OK"
+        if [ -f out/arch/arm64/boot/Image.gz ]; then
+          echo "Kernel Image exists"
+        elif [ -f out/arch/arm64/boot/Image ]; then
+          echo "Kernel Image exists"
+        else
+          echo "Kernel Image missing"
+          exit 1
+        fi
 
-    - name: Upload Kernel
+
+    - name: Upload Kernel Output
       uses: actions/upload-artifact@v4
       with:
         name: realme5i-stock-kernel
         path: |
-          out/arch/arm64/boot/Image.gz
+          out/arch/arm64/boot/*
           out/.config

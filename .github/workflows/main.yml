@@ -22,9 +22,9 @@ jobs:
         run: |
           mkdir -p $HOME/clang
           cd $HOME/clang
-          curl -L -o clang.tar.gz https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928/archive/refs/heads/main.tar.gz
-          tar -xzf clang.tar.gz
-          mv android_prebuilts_clang_host_linux-x86_clang-r510928-main clang
+          # সরাসরি গ্যালাক্সি/লাইনআউটের জিপ লিংক বা সঠিক গিট ক্লোন ব্যবহার করা
+          git clone --depth=1 https://gitlab.com/LeLexDev/aosp-clang.git clang || \
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r510928.git clang
           echo "$HOME/clang/clang/bin" >> $GITHUB_PATH
 
       - name: Build Kernel

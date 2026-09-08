@@ -9,7 +9,7 @@ jobs:
 
     steps:
 
-    - name: Checkout Source
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
 
 
@@ -33,57 +33,20 @@ jobs:
           gcc-aarch64-linux-gnu
 
 
-    - name: Toolchain
+    - name: Check Toolchain
       run: |
         clang-18 --version
         ld.lld-18 --version
 
 
-    - name: Clean Build
+    - name: Clean Output
       run: |
-        git reset --hard HEAD
-        git clean -xfd
-
         rm -rf out
-
-
-    - name: Show Prepare3
-      run: |
-        echo "===== Makefile prepare3 ====="
-        nl -ba Makefile | sed -n '1170,1220p'
-
-
-    - name: Patch Prepare3 Clean Check
-      run: |
-        python3 - <<'PY'
-        from pathlib import Path
-        import re
-
-        p = Path("Makefile")
-        s = p.read_text()
-
-        # remove the source dirty check error
-        s = re.sub(
-            r'echo.*not clean.*make mrproper.*',
-            'true',
-            s
-        )
-
-        s = re.sub(
-            r'\$\(error.*not clean.*\)',
-            'true',
-            s
-        )
-
-        p.write_text(s)
-
-        print("prepare3 patch applied")
-        PY
+        mkdir -p out
 
 
     - name: Prepare Config
       run: |
-        mkdir -p out
 
         cp arch/arm64/configs/defconfig out/.config
 
@@ -93,17 +56,22 @@ jobs:
         scripts/config --disable MODULE_SIG || true
         scripts/config --disable MODULE_SIG_FORCE || true
 
-        make O=out ARCH=arm64 olddefconfig
+        make \
+          ARCH=arm64 \
+          O=out \
+          olddefconfig
 
 
-    - name: Fix Clang 18
+    - name: Patch Clang 18 Compatibility
       run: |
 
+        # Fix ARM64 ticket lock clang 18 error
         sed -i \
         's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
 
 
+        # Fix signal array bounds warning
         sed -i \
         's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
         include/linux/signal.h || true
@@ -115,8 +83,9 @@ jobs:
         export PATH=/usr/lib/llvm-18/bin:$PATH
         export KBUILD_OUTPUT=$PWD/out
 
-        make O=out \
+        make \
           ARCH=arm64 \
+          O=out \
           LLVM=1 \
           LLVM_IAS=1 \
           CC=clang-18 \
@@ -128,20 +97,28 @@ jobs:
         exit ${PIPESTATUS[0]}
 
 
-    - name: Check Image
+    - name: Check Kernel Image
       run: |
 
-        ls -lh out/arch/arm64/boot
+        ls -lh out/arch/arm64/boot/
 
-        test -f out/arch/arm64/boot/Image.gz || \
-        test -f out/arch/arm64/boot/Image
+        if [ -f out/arch/arm64/boot/Image.gz ]; then
+          echo "Image.gz found"
+
+        elif [ -f out/arch/arm64/boot/Image ]; then
+          echo "Image found"
+
+        else
+          echo "Kernel Image not found"
+          exit 1
+        fi
 
 
-    - name: Upload
+    - name: Upload Kernel
       uses: actions/upload-artifact@v4
       with:
-        name: Realme5i-Kernel
+        name: Realme5i-kernel
         path: |
           out/arch/arm64/boot/*
-          build.log
           out/.config
+          build.log

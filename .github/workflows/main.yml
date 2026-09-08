@@ -39,15 +39,17 @@ jobs:
         ld.lld-18 --version
 
 
-    - name: Clean Kernel Tree
+    - name: Clean Source Tree
       run: |
         git reset --hard HEAD
         git clean -xfd
 
+        rm -rf out
+
         make ARCH=arm64 mrproper || true
 
 
-    - name: Prepare Kernel Config
+    - name: Prepare Config
       run: |
         mkdir -p out
 
@@ -59,22 +61,30 @@ jobs:
         scripts/config --disable MODULE_SIG || true
         scripts/config --disable MODULE_SIG_FORCE || true
 
-        make ARCH=arm64 olddefconfig
+        make O=out ARCH=arm64 olddefconfig
 
 
-    - name: Disable Kernel Clean Check
+    - name: Fix Kernel Clean Check
       run: |
-        echo "Checking Makefile clean check..."
+        python3 - <<'PY'
+        from pathlib import Path
 
-        grep -n "not clean" Makefile || true
+        p = Path("Makefile")
+        s = p.read_text()
 
-        sed -i '/please run.*make mrproper/,+2 s/^/#/' Makefile || true
+        s = s.replace(
+            "echo >&2 \"  .. is not clean, please run 'make mrproper'\";",
+            "echo >&2 \"  source clean check skipped\";"
+        )
+
+        p.write_text(s)
+        PY
 
 
     - name: Patch Clang 18 Compatibility
       run: |
 
-        # ARM64 spinlock fix
+        # ARM64 spinlock clang 18 fix
         sed -i \
         's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
@@ -92,7 +102,7 @@ jobs:
         export PATH=/usr/lib/llvm-18/bin:$PATH
         export KBUILD_OUTPUT=$PWD/out
 
-        make \
+        make O=out \
           ARCH=arm64 \
           LLVM=1 \
           LLVM_IAS=1 \

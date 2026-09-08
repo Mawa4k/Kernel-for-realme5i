@@ -31,6 +31,9 @@ jobs:
         clang-18 --version
         ld.lld-18 --version
         aarch64-linux-gnu-gcc --version
+        echo 'int main(){return 0;}' | clang-18 --target=aarch64-linux-gnu -fstack-protector -x c -c -o /tmp/test.o - \
+          && echo "Clang cross-compile stackprotector test: OK" \
+          || echo "Clang cross-compile stackprotector test: FAILED (expected — will disable stackprotector)"
 
     - name: Find Defconfig
       id: findcfg
@@ -70,12 +73,12 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           "$DEFCONFIG"
 
-        # Properly disable STRONG / enable REGULAR stackprotector using kernel's own config tool
+        # Disable stackprotector entirely — avoids the broken compiler-check with clang cross-compile
         ./scripts/config --file out/.config \
           -d CC_STACKPROTECTOR_STRONG \
-          -e CC_STACKPROTECTOR_REGULAR
+          -d CC_STACKPROTECTOR_REGULAR \
+          -e CC_STACKPROTECTOR_NONE
 
-        # Non-interactive resync — 'yes ""' auto-answers any leftover prompt with default
         yes "" | make O=out ARCH=arm64 \
           CC=clang-18 LD=ld.lld-18 \
           CLANG_TRIPLE=aarch64-linux-gnu- \

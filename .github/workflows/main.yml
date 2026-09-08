@@ -9,40 +9,68 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+
+    # Old Android kernel build এর জন্য Ubuntu 22.04 ভালো
+    runs-on: ubuntu-22.04
 
     steps:
 
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
 
+
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y \
-          bc bison build-essential ccache curl flex \
-          git libelf-dev libssl-dev libncurses-dev \
-          python3 unzip wget lzop
 
-    - name: Setup Clang 18
+        sudo apt install -y \
+        bc \
+        bison \
+        build-essential \
+        ccache \
+        curl \
+        flex \
+        git \
+        libelf-dev \
+        libssl-dev \
+        libncurses-dev \
+        python3 \
+        unzip \
+        wget \
+        lzop
+
+
+    - name: Setup Clang Toolchain
       run: |
         mkdir -p $HOME/clang
         cd $HOME/clang
 
         git clone --depth=1 \
-        https://github.com/kdrag0n/proton-clang.git clang
+        https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r522817.git clang
 
         echo "$HOME/clang/clang/bin" >> $GITHUB_PATH
 
-    - name: Prepare Kernel Config
-      run: |
-        export ARCH=arm64
 
-        echo "Checking configs..."
+    - name: Check Defconfig
+      run: |
+        echo "Available configs:"
         ls arch/arm64/configs
 
-        make O=out trinket_defconfig
+        echo "Checking vendor configs:"
+        ls arch/arm64/configs/vendor || true
 
+
+    - name: Configure Kernel
+      run: |
+
+        export ARCH=arm64
+
+        mkdir -p out
+
+        make O=out vendor/trinket_defconfig
+
+
+        # Enable external module loading
         scripts/config --file out/.config \
         -e MODULES \
         -e MODULE_FORCE_LOAD \
@@ -52,32 +80,47 @@ jobs:
         -d MODULE_SIG_FORCE \
         -d MODULE_SIG_ALL
 
+
         make O=out olddefconfig
+
+
+        echo "Kernel config:"
+        grep CONFIG_MODULE out/.config || true
+
 
 
     - name: Build Kernel
       run: |
+
         export ARCH=arm64
         export SUBARCH=arm64
+
         export PATH=$HOME/clang/clang/bin:$PATH
+
 
         make -j$(nproc --all) \
         O=out \
         ARCH=arm64 \
         CC=clang \
+        LD=ld.lld \
         LLVM=1 \
         LLVM_IAS=1
 
 
-    - name: Check Image
+
+    - name: Check Output
       run: |
+
+        echo "Kernel Image:"
         ls -lh out/arch/arm64/boot/
 
 
     - name: Upload Kernel Image
       uses: actions/upload-artifact@v4
       with:
-        name: Realme5i-Stock-Kernel
+
+        name: Realme5i-Stock-Kernel-Image
+
         path: |
           out/arch/arm64/boot/Image.gz-dtb
           out/arch/arm64/boot/Image

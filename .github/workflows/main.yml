@@ -35,14 +35,24 @@ jobs:
     - name: Find Defconfig
       id: findcfg
       run: |
-        echo "Available defconfigs:"
-        ls arch/arm64/configs/ || true
-        CFG=$(ls arch/arm64/configs/ | grep -iE 'trinket|sm6125|vendor|k68|msm' | head -n1)
+        echo "All defconfig files found:"
+        find arch/arm64/configs -type f -name '*defconfig*' | sort
+
+        CFG=$(find arch/arm64/configs -type f -name '*defconfig*' \
+              | grep -iE 'trinket|sm6125|6125|k68' | head -n1)
+
         if [ -z "$CFG" ]; then
-          CFG=$(ls arch/arm64/configs/ | head -n1)
+          CFG=$(find arch/arm64/configs -type f -name '*defconfig*' | head -n1)
         fi
-        echo "Using defconfig: $CFG"
-        echo "defconfig=$CFG" >> "$GITHUB_OUTPUT"
+
+        if [ -z "$CFG" ]; then
+          echo "No defconfig file found at all!"
+          exit 1
+        fi
+
+        REL=$(echo "$CFG" | sed 's|arch/arm64/configs/||')
+        echo "Using defconfig: $REL"
+        echo "defconfig=$REL" >> "$GITHUB_OUTPUT"
 
     - name: Create Build Directory
       run: |
@@ -65,19 +75,16 @@ jobs:
 
     - name: Apply Clang 18 Fixes
       run: |
-        # ticket lock inline asm fix
         if [ -f arch/arm64/include/asm/spinlock.h ]; then
           sed -i 's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
             arch/arm64/include/asm/spinlock.h || true
         fi
 
-        # signal bounds fix
         if [ -f include/linux/signal.h ]; then
           sed -i 's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
             include/linux/signal.h || true
         fi
 
-        # stack protector / weak symbol issues common on clang 18
         find . -name Makefile -exec sed -i 's/-Werror//g' {} \; 2>/dev/null || true
 
     - name: Reset Generated Changes

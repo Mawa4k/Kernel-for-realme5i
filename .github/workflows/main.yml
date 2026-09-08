@@ -5,6 +5,7 @@ on:
 
 jobs:
   build:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -14,6 +15,7 @@ jobs:
       with:
         clean: true
         fetch-depth: 1
+
 
     - name: Install Dependencies
       run: |
@@ -39,51 +41,44 @@ jobs:
           device-tree-compiler \
           kmod
 
+
+
     - name: Force LLVM 18
       run: |
 
-        sudo update-alternatives \
-          --install /usr/bin/clang clang \
-          /usr/lib/llvm-18/bin/clang 180
+        export PATH=/usr/lib/llvm-18/bin:$PATH
 
-        sudo update-alternatives \
-          --install /usr/bin/ld.lld ld.lld \
-          /usr/lib/llvm-18/bin/ld.lld 180
-
-        sudo update-alternatives \
-          --install /usr/bin/llvm-objcopy llvm-objcopy \
-          /usr/lib/llvm-18/bin/llvm-objcopy 180
-
-        sudo update-alternatives \
-          --install /usr/bin/llvm-strip llvm-strip \
-          /usr/lib/llvm-18/bin/llvm-strip 180
-
+        echo "LLVM PATH:"
+        which clang
+        which llvm-objcopy
+        which ld.lld
 
         clang --version
-        ld.lld --version
         llvm-objcopy --version
+        ld.lld --version
 
 
-    - name: Create Output Directory
+
+    - name: Create Out Directory
       run: |
         rm -rf out
         mkdir out
 
 
-    - name: Setup Realme 5i Defconfig
+
+    - name: Setup Defconfig
       run: |
 
         export PATH=/usr/lib/llvm-18/bin:$PATH
 
 
         make O=out ARCH=arm64 \
-          CC=clang \
-          LD=ld.lld \
           LLVM=1 \
           LLVM_IAS=1 \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
+          CC=clang \
+          LD=ld.lld \
           vendor/trinket_oppo/trinket_defconfig
+
 
 
         ./scripts/config --file out/.config \
@@ -93,34 +88,53 @@ jobs:
 
 
         ./scripts/config --file out/.config \
+          -d CONFIG_WERROR \
           -e CONFIG_MODULES \
           -e CONFIG_MODULE_UNLOAD \
           -d CONFIG_MODULE_SIG \
           -d CONFIG_MODULE_SIG_FORCE
 
 
+
         yes "" | make O=out ARCH=arm64 \
-          CC=clang \
-          LD=ld.lld \
           LLVM=1 \
           LLVM_IAS=1 \
+          CC=clang \
+          LD=ld.lld \
           oldconfig
 
 
 
-    - name: Patch Old Kernel Clang Issues
+    - name: Remove Bad Clang Flags
       run: |
 
-        # Fix old ARM64 stack pointer clang issue
-        sed -i \
-        's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer __asm__("sp");/' \
-        arch/arm64/include/asm/stack_pointer.h || true
+        echo "Cleaning old gcc flags"
 
 
-        # Fix old GCC warning treated as error
+        find . \
+        \( -name "Makefile" -o -name "*.mk" \) \
+        -type f \
+        -exec sed -i \
+        's/-implicit-function-declaration//g' {} \;
+
+
         sed -i \
         's/-Werror//g' \
         Makefile || true
+
+
+
+    - name: Fix Old ARM64 Clang Issue
+      run: |
+
+
+        if [ -f arch/arm64/include/asm/stack_pointer.h ]; then
+
+        sed -i \
+        's/register unsigned long current_stack_pointer asm ("sp");/register unsigned long current_stack_pointer __asm__("sp");/' \
+        arch/arm64/include/asm/stack_pointer.h
+
+        fi
 
 
 
@@ -128,6 +142,7 @@ jobs:
       run: |
 
         export PATH=/usr/lib/llvm-18/bin:$PATH
+
 
         set -o pipefail
 
@@ -146,45 +161,44 @@ jobs:
           STRIP=llvm-strip \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-error \
-          -Wno-array-bounds \
-          -Wno-unused-variable \
-          -Wno-unused-but-set-variable \
-          -Wno-misleading-indentation" \
+          KCFLAGS="-Wno-error -Wno-array-bounds -Wno-unused-variable -Wno-unused-but-set-variable -Wno-misleading-indentation" \
           2>&1 | tee build.log
 
 
 
-    - name: Check Output
+    - name: Check Build Result
       if: always()
       run: |
 
-        echo "===== BOOT FILES ====="
+
+        echo "===== IMAGE ====="
 
         ls -lh out/arch/arm64/boot/ || true
 
 
-        echo "===== IMAGE CHECK ====="
+        echo "===== SEARCH IMAGE ====="
 
-        find out/arch/arm64/boot \
-          -name "Image*" \
-          -o -name "dtb" || true
+        find out \
+        -name "Image*" \
+        -o -name "vmlinux" || true
 
 
         echo "===== ERRORS ====="
 
-        grep -n "error:" build.log | tail -30 || true
+        grep -n "error:" build.log | tail -50 || true
 
 
 
     - name: Upload Kernel
       if: always()
       uses: actions/upload-artifact@v4
+
       with:
 
         name: Realme5i-Kernel
 
         path: |
+
           out/arch/arm64/boot/*
           out/vmlinux
           out/.config

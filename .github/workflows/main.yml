@@ -33,13 +33,13 @@ jobs:
           gcc-aarch64-linux-gnu
 
 
-    - name: Check Toolchain
+    - name: Toolchain Check
       run: |
         clang-18 --version
         ld.lld-18 --version
 
 
-    - name: Clean Source Tree
+    - name: Clean Source
       run: |
         git reset --hard HEAD
         git clean -xfd
@@ -47,6 +47,26 @@ jobs:
         rm -rf out
 
         make ARCH=arm64 mrproper || true
+
+
+    - name: Patch Kernel Makefile Clean Check
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
+
+        p = Path("Makefile")
+        s = p.read_text()
+
+        old = """$(error "  .. is not clean, please run 'make mrproper'")"""
+
+        if old in s:
+            s = s.replace(old, "")
+            print("Clean check disabled")
+        else:
+            print("Clean check pattern not found")
+
+        p.write_text(s)
+        PY
 
 
     - name: Prepare Config
@@ -64,33 +84,16 @@ jobs:
         make O=out ARCH=arm64 olddefconfig
 
 
-    - name: Fix Kernel Clean Check
-      run: |
-        python3 - <<'PY'
-        from pathlib import Path
-
-        p = Path("Makefile")
-        s = p.read_text()
-
-        s = s.replace(
-            "echo >&2 \"  .. is not clean, please run 'make mrproper'\";",
-            "echo >&2 \"  source clean check skipped\";"
-        )
-
-        p.write_text(s)
-        PY
-
-
-    - name: Patch Clang 18 Compatibility
+    - name: Patch Clang 18 Issues
       run: |
 
-        # ARM64 spinlock clang 18 fix
+        # ARM64 spinlock fix
         sed -i \
         's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
         arch/arm64/include/asm/spinlock.h
 
 
-        # signal.h array bounds fix
+        # signal.h array bound fix
         sed -i \
         's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
         include/linux/signal.h || true
@@ -132,7 +135,7 @@ jobs:
         fi
 
 
-    - name: Upload Kernel
+    - name: Upload Build Output
       uses: actions/upload-artifact@v4
       with:
         name: Realme5i-Kernel

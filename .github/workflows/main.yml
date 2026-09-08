@@ -3,22 +3,26 @@ name: Realme 5i Kernel Build
 on:
   workflow_dispatch:
 
+
 jobs:
   build:
 
     runs-on: ubuntu-latest
 
+
     steps:
 
-    - name: Checkout Source
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
         clean: true
         fetch-depth: 1
 
 
+
     - name: Install Dependencies
       run: |
+
         sudo apt update
 
         sudo apt install -y \
@@ -33,18 +37,23 @@ jobs:
           kmod
 
 
-    - name: Toolchain
+
+    - name: Toolchain Check
       run: |
+
         clang-18 --version
         ld.lld-18 --version
         aarch64-linux-gnu-gcc --version
 
 
-    - name: Select Defconfig
+
+
+    - name: Find Defconfig
       id: cfg
       run: |
 
-        echo "Available configs:"
+        echo "Finding configs"
+
         find arch/arm64/configs -type f -name "*defconfig*" | sort
 
 
@@ -57,26 +66,31 @@ jobs:
 
 
         if [ ! -f "$DEF" ]; then
-          echo "No trinket config found"
+          echo "Defconfig missing"
           exit 1
         fi
 
 
-        echo "Using $DEF"
+        echo "Selected:"
+        echo $DEF
 
 
         echo "defconfig=$(echo $DEF | sed 's|arch/arm64/configs/||')" >> $GITHUB_OUTPUT
 
 
 
-    - name: Prepare Out
+
+    - name: Prepare Output
       run: |
+
         rm -rf out
+
         mkdir out
 
 
 
-    - name: Generate Config
+
+    - name: Configure Kernel
       env:
         DEFCONFIG: ${{ steps.cfg.outputs.defconfig }}
 
@@ -99,18 +113,18 @@ jobs:
           --disable CONFIG_CC_STACKPROTECTOR_STRONG \
           --disable CONFIG_CC_STACKPROTECTOR_REGULAR \
           --enable CONFIG_CC_STACKPROTECTOR_NONE \
-          --disable CONFIG_STACK_VALIDATION
+          --disable CONFIG_STACK_VALIDATION || true
 
 
 
         sed -i \
         's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' \
-        out/.config
+        out/.config || true
 
 
         sed -i \
         's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/# CONFIG_CC_STACKPROTECTOR_REGULAR is not set/' \
-        out/.config
+        out/.config || true
 
 
 
@@ -124,37 +138,53 @@ jobs:
 
 
 
-        grep STACKPROTECTOR out/.config || true
 
-
-
-    - name: Clang Compatibility Patch
+    - name: Apply Clang Fixes
       run: |
 
 
+        echo "Applying fixes"
+
+
+
+        # arm64 spinlock clang fix
+
         if [ -f arch/arm64/include/asm/spinlock.h ]; then
+
 
           sed -i \
           's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
           arch/arm64/include/asm/spinlock.h || true
 
+
+          sed -i \
+          's/add w\([0-9]\+\),w\([0-9]\+\),x\([0-9]\+\)/add x\1,x\2,x\3/g' \
+          arch/arm64/include/asm/spinlock.h || true
+
+
         fi
 
 
 
+
+        # qcom mdss clang warning fix
+
         if [ -f drivers/clk/qcom/mdss/mdss-dsi-pll-14nm-util.c ]; then
+
 
           sed -i \
           's/%lu/%u/g' \
           drivers/clk/qcom/mdss/mdss-dsi-pll-14nm-util.c || true
 
+
         fi
 
 
 
-    - name: Build Kernel
 
+    - name: Build Kernel
       run: |
+
 
         export PATH=/usr/lib/llvm-18/bin:$PATH
 
@@ -162,11 +192,12 @@ jobs:
         set -o pipefail
 
 
+
         make -j$(nproc) \
           O=out \
           ARCH=arm64 \
           LLVM=1 \
-          LLVM_IAS=1 \
+          LLVM_IAS=0 \
           CC=clang-18 \
           LD=ld.lld-18 \
           AR=llvm-ar \
@@ -181,49 +212,36 @@ jobs:
           -Wno-array-bounds \
           -Wno-unused-variable \
           -Wno-unused-but-set-variable \
-          -Wno-implicit-function-declaration" \
+          -Wno-misleading-indentation" \
           2>&1 | tee build.log
 
 
 
-    - name: Show Error If Failed
 
+    - name: Show Error
       if: failure()
-
       run: |
 
-        echo "===== LAST LOG ====="
-
-        tail -200 build.log
-
-
-        echo "===== ERROR ====="
+        echo "========== ERROR =========="
 
         grep -nEi \
         "error:|failed|fatal|undefined|cannot|No rule" \
         build.log || true
 
 
+        echo "========== LAST LOG =========="
 
-    - name: Check Image
+        tail -200 build.log
 
+
+
+
+    - name: Check Kernel Image
       if: always()
-
       run: |
 
+
         ls -lh out/arch/arm64/boot/ || true
-
-
-        if [ -f out/arch/arm64/boot/Image.gz ] || \
-           [ -f out/arch/arm64/boot/Image ]; then
-
-          echo "Kernel Image OK"
-
-        else
-
-          echo "Kernel Image not found"
-
-        fi
 
 
 

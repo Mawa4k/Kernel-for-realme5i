@@ -31,6 +31,7 @@ jobs:
         clang-18 --version
         ld.lld-18 --version
         aarch64-linux-gnu-gcc --version
+        aarch64-linux-gnu-as --version
 
     - name: Find Defconfig
       id: findcfg
@@ -106,7 +107,7 @@ jobs:
         make -j$(nproc) O=out \
           ARCH=arm64 \
           LLVM=1 \
-          LLVM_IAS=1 \
+          LLVM_IAS=0 \
           CC=clang-18 \
           LD=ld.lld-18 \
           AR=llvm-ar \
@@ -114,6 +115,7 @@ jobs:
           OBJCOPY=llvm-objcopy \
           OBJDUMP=llvm-objdump \
           STRIP=llvm-strip \
+          AS=aarch64-linux-gnu-as \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration" \

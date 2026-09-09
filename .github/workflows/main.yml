@@ -119,6 +119,15 @@ jobs:
           KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration" \
           2>&1 | tee build.log
 
+    - name: Extract Real Error
+      if: failure()
+      run: |
+        echo "=== Lines containing 'error' ==="
+        grep -n -i "error" build.log | grep -v "^--$" || echo "No explicit error lines found"
+        echo ""
+        echo "=== Last 80 lines of build.log ==="
+        tail -n 80 build.log
+
     - name: Check Kernel Image
       run: |
         ls -lh out/arch/arm64/boot/ || true

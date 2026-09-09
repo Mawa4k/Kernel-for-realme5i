@@ -123,6 +123,7 @@ jobs:
           STRIP=llvm-strip \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
+          LDFLAGS_vmlinux="-z notext" \
           KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-deprecated-non-prototype -Wno-implicit-int" \
           2>&1 | tee build.log
 

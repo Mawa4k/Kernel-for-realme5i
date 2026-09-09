@@ -84,10 +84,9 @@ jobs:
 
     - name: Apply Clang 18 Fixes
       run: |
-        if [ -f arch/arm64/include/asm/spinlock.h ]; then
-          sed -i 's/"I" (1 << TICKET_SHIFT)/"r" (1 << TICKET_SHIFT)/g' \
-            arch/arm64/include/asm/spinlock.h || true
-        fi
+        # NOTE: TICKET_SHIFT / "I" constraint in spinlock.h is CORRECT as-is.
+        # Do NOT change "I" to "r" — 65536 is a valid AArch64 immediate,
+        # and forcing a register there breaks clang's %w register-width printing.
 
         if [ -f include/linux/signal.h ]; then
           sed -i 's/case 2: set->sig\[1\] = -1;/case 2: if (_NSIG_WORDS > 1) set->sig[1] = -1;/' \
@@ -107,7 +106,7 @@ jobs:
         make -j$(nproc) O=out \
           ARCH=arm64 \
           LLVM=1 \
-          LLVM_IAS=0 \
+          LLVM_IAS=1 \
           CC=clang-18 \
           LD=ld.lld-18 \
           AR=llvm-ar \
@@ -115,7 +114,6 @@ jobs:
           OBJCOPY=llvm-objcopy \
           OBJDUMP=llvm-objdump \
           STRIP=llvm-strip \
-          AS=aarch64-linux-gnu-as \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration" \

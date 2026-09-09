@@ -116,7 +116,7 @@ jobs:
           STRIP=llvm-strip \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration" \
+          KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-deprecated-non-prototype" \
           2>&1 | tee build.log
 
     - name: Extract Real Error

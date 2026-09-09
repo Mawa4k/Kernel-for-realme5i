@@ -93,6 +93,13 @@ jobs:
             include/linux/signal.h || true
         fi
 
+        # Remove standalone "-Werror" tokens (word-boundary safe) from all
+        # vendor/driver Makefiles, so top-level -Wno-error isn't overridden.
+        # This does NOT touch compound flags like -Werror-implicit-function-declaration
+        # since we only match -Werror when followed by whitespace/end-of-line.
+        find . -name "Makefile" -not -path "./out/*" -print0 | \
+          xargs -0 sed -i -E 's/(^|[[:space:]])-Werror([[:space:]]|$)/\1\2/g'
+
     - name: Reset Generated Changes
       run: |
         git checkout -- include/generated arch/arm64/include/generated 2>/dev/null || true
@@ -116,7 +123,7 @@ jobs:
           STRIP=llvm-strip \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-deprecated-non-prototype" \
+          KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-deprecated-non-prototype -Wno-implicit-int" \
           2>&1 | tee build.log
 
     - name: Extract Real Error

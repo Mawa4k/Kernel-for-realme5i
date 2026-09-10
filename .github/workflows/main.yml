@@ -1,4 +1,4 @@
-name: Realme 5i Kernel Build (No -z notext Test)
+name: Realme 5i Kernel Build (Stock Stackprotector Test)
 
 on:
   workflow_dispatch:
@@ -71,10 +71,9 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           "$DEFCONFIG"
 
+        # NOTE: Stackprotector left at whatever the stock defconfig sets —
+        # NOT touched this round, to isolate whether it's the bootloop/hang cause.
         ./scripts/config --file out/.config \
-          -d CC_STACKPROTECTOR_STRONG \
-          -d CC_STACKPROTECTOR_REGULAR \
-          -e CC_STACKPROTECTOR_NONE \
           -e MODULES \
           -e MODULE_FORCE_LOAD \
           -e MODULE_UNLOAD \
@@ -129,6 +128,7 @@ jobs:
           STRIP=llvm-strip \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
+          LDFLAGS_vmlinux="-z notext" \
           KCFLAGS="-Wno-array-bounds -Wno-error -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-deprecated-non-prototype -Wno-implicit-int" \
           2>&1 | tee build.log
 
@@ -162,7 +162,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: Realme5i-Kernel-NoZNotext-Test
+        name: Realme5i-Kernel-StockStackprotector-Test
         path: |
           out/arch/arm64/boot/*
           out/kernel.config

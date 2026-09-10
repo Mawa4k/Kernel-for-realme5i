@@ -74,7 +74,14 @@ jobs:
         ./scripts/config --file out/.config \
           -d CC_STACKPROTECTOR_STRONG \
           -d CC_STACKPROTECTOR_REGULAR \
-          -e CC_STACKPROTECTOR_NONE
+          -e CC_STACKPROTECTOR_NONE \
+          -e MODULES \
+          -e MODULE_FORCE_LOAD \
+          -e MODULE_UNLOAD \
+          -e MODULE_FORCE_UNLOAD \
+          -d MODULE_SIG \
+          -d MODULE_SIG_FORCE \
+          -d MODULE_SIG_ALL
 
         yes "" | make O=out ARCH=arm64 \
           CC=clang-18 LD=ld.lld-18 \
@@ -149,6 +156,10 @@ jobs:
           exit 1
         fi
 
+    - name: Copy Config For Verification
+      run: |
+        cp out/.config out/kernel.config
+
     - name: Upload Kernel
       if: always()
       uses: actions/upload-artifact@v4
@@ -156,6 +167,6 @@ jobs:
         name: Realme5i-Kernel
         path: |
           out/arch/arm64/boot/*
-          out/.config
+          out/kernel.config
           build.log
         if-no-files-found: warn
